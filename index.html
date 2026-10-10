@@ -786,6 +786,8 @@ h3,
         <button id="away-close" class="action" type="button">OK</button>
       </section>
 
+      <section id="tour-tip" class="away" hidden></section>
+
       <canvas id="course" width="800" height="450"></canvas>
 
       <div class="controls">
@@ -2868,7 +2870,7 @@ h3,
   const MIGRATIONS = {};
   // Which build this is. tools/single-file.js writes the date and commit in
   // here when it builds the game for sharing; run from the project it stays 'dev'.
-  const BUILD = "2026-10-10 (fbd5390)";
+  const BUILD = "2026-10-10 (d79a5a4)";
   // Where the newest shared build says which build it is, and where it can be
   // played or downloaded. A shared copy looks there now and then to see
   // whether it has been overtaken; nothing is sent.
@@ -2901,6 +2903,7 @@ h3,
   const MOMENTUM_MIN = -3;       // as cold as the golfer gets
   const MOMENTUM_MAX = 5;        // and as hot
   const LEGACY_LEVELS = 8;       // sub-attribute levels gained per legacy point on retiring
+  const TOUR_TIP_HOLES = 18;     // holes played before a player who has never entered a tournament is told about them
   const ACADEMY_COST = 700000;   // coins to fund this career's first junior academy; each one after costs twice the last
   const LEGACY_XP = 0.03;        // experience bonus per effective legacy point
   const LEGACY_COINS = 0.02;     // income bonus per effective legacy point
@@ -3162,6 +3165,7 @@ h3,
     bag: document.getElementById('bag-list'),
     settings: document.getElementById('settings'),
     away: document.getElementById('away'),
+    tourTip: document.getElementById('tour-tip'),
     awayText: document.getElementById('away-text'),
     awayClose: document.getElementById('away-close'),
     reset: document.getElementById('reset'),
@@ -3191,6 +3195,7 @@ h3,
   let volume = 1;                // 0 to 1
   let reduceMotion = false;      // no particles, drifting or blinking, and the camera cuts instead of gliding
   let hideMinimap = false;
+  let tourTipOff = false;        // true once the player has put the word about tournaments away
   const HISTORY_SIZE = 20;       // past careers remembered
   let paused = false;
   let speed = 1;                 // play speed chosen with the speed buttons
@@ -6508,10 +6513,42 @@ h3,
     return n === 0 ? 'E' : n > 0 ? '+' + n : String(n);
   }
 
+  // Tells a player who has never played a tournament that the first one is
+  // open, above the course where it will be seen: a tester played 156 holes
+  // without finding them. It goes once they enter one, turn auto-enter on or
+  // put it away.
+  function renderTourTip() {
+    const career = save.career;
+    const base = holeBaseCoins(save.hole);
+    const fee = Career.tournamentFee(0, base);
+    const tour = Career.TOURS[0];
+    const show = !tourTipOff && save.legacy.played === 0 && !career.tournament && !career.tour.auto &&
+      save.holesPlayed >= TOUR_TIP_HOLES && save.coins >= fee;
+    el.tourTip.hidden = !show;
+    el.tourTip.textContent = '';
+    if (!show) return;
+    el.tourTip.appendChild(make('p', '', 'You can play in tournaments. ' + Career.theName(0).replace(/^t/, 'T') + ' is ' + Career.TOUR_HOLES + ' holes at ' + tour.course +
+      ' against three rivals: entry ' + fee.toLocaleString() + ' coins, first prize ' + Math.round(fee * Career.TOUR_PRIZES[0]).toLocaleString() +
+      '. Tournaments are on the Career tab, where the game can also enter them for you.'));
+    el.tourTip.appendChild(actionButton('Enter', true, () => {
+      save.coins -= Career.enterTournament(career, 0, base, save.coins);
+      if (career.tournament) career.tournament.pending = true;   // the hole in play is not part of it
+      showTab('career');
+      prefs.tab = 'career';
+      savePrefs();
+    }));
+    el.tourTip.appendChild(actionButton('Not now', true, () => {
+      tourTipOff = true;
+      prefs.tourTip = true;
+      savePrefs();
+    }));
+  }
+
   function renderTournament() {
     const career = save.career;
     const box = el.tournament;
     box.textContent = '';
+    renderTourTip();
     el.autoEnter.checked = career.tour.auto;
 
     const t = career.tournament;
@@ -7252,6 +7289,8 @@ h3,
   setMotion(prefs.reduceMotion);
   hideMinimap = prefs.hideMinimap === true;
   el.hideMinimap.checked = hideMinimap;
+  tourTipOff = prefs.tourTip === true;
+  renderTourTip();
   el.autoUpdate.checked = prefs.autoUpdate !== false;
   setMoments(prefs.moments === true);
 
