@@ -2259,8 +2259,11 @@ h3,
 
   // Squared distance from a point to the centre line. This runs for every
   // physics step on the ground, so it avoids square roots.
-  function distanceToLineSq(line, x, z) {
-    let best = Infinity;
+  // Whether (x, z) is on the mown fairway: within the fairway's half-width of
+  // its centre line, where the half-width is the one at that point of the hole.
+  function onFairway(hole, x, z) {
+    const line = hole.line;
+    const widths = hole.widths;
     for (let i = 1; i < line.length; i++) {
       const a = line[i - 1];
       const b = line[i];
@@ -2270,10 +2273,57 @@ h3,
       t = t < 0 ? 0 : t > 1 ? 1 : t;
       const ex = x - a.x - dx * t;
       const ez = z - a.z - dz * t;
-      const d = ex * ex + ez * ez;
-      if (d < best) best = d;
+      const half = widths[i - 1] + (widths[i] - widths[i - 1]) * t;
+      if (ex * ex + ez * ez <= half * half) return true;
     }
-    return best;
+    return false;
+  }
+
+  // The looks of a hole that are not part of its layout are drawn from a
+  // seed of their own, so that changing them leaves every hole where it was.
+  function lookSeed(number) {
+    return mulberry32(Math.imul(number, 362437) + 99);
+  }
+
+  // The fairway's half-width at each sample of its centre line: a neck by
+  // the tee, then swelling and narrowing once or twice on the way to the green.
+  function fairwayWidths(look, line, halfWidth) {
+    const waves = 1 + look() * 1.5;
+    const phase = look() * Math.PI * 2;
+    return line.map((p, i) => {
+      const t = i / (line.length - 1);
+      const neck = 0.72 + 0.28 * Math.min(1, t / 0.15);
+      return halfWidth * neck * (1.02 + 0.16 * Math.sin(Math.PI * 2 * waves * t + phase));
+    });
+  }
+
+  // The green's outline: how far it reaches from the cup in each direction,
+  // as a share of GREEN_RADIUS. No green reaches further than GREEN_RADIUS.
+  function greenShape(look) {
+    return { two: 0.05 + look() * 0.07, three: look() * 0.04, turn2: look() * Math.PI, turn3: look() * Math.PI * 2 };
+  }
+
+  function greenReach(hole, angle) {
+    const g = hole.green;
+    return GREEN_RADIUS * (0.86 + g.two * Math.cos(2 * (angle - g.turn2)) + g.three * Math.cos(3 * (angle - g.turn3)));
+  }
+
+  function onGreen(hole, x, z) {
+    const dx = x - hole.cup.x;
+    const dz = z - hole.cup.z;
+    const far = Math.hypot(dx, dz);
+    return far <= GREEN_RADIUS && far <= greenReach(hole, Math.atan2(dx, dz));
+  }
+
+  // The green's edge as points [x, z], for drawing.
+  function greenOutline(hole) {
+    const points = [];
+    for (let i = 0; i < 32; i++) {
+      const angle = (i / 32) * Math.PI * 2;
+      const reach = greenReach(hole, angle);
+      points.push([hole.cup.x + Math.sin(angle) * reach, hole.cup.z + Math.cos(angle) * reach]);
+    }
+    return points;
   }
 
   // Hazards are ellipses lying square to the hole: { type, x, z, rx, rz }.
@@ -2389,15 +2439,29 @@ h3,
   }
 
   // Scenery only: trees in the rough around the hole.
-  function placeTrees(rng) {
+  // Scenery: trees in a line down both sides of the hole, a little way into
+  // the rough, with a second, broken row behind them, and a few beyond each
+  // end. None stands in sand or water. They are for show: a ball passes them.
+  function placeTrees(rng, hole) {
     const trees = [];
-    for (let i = 0; i < 30; i++) {
-      const side = rng() < 0.5 ? -1 : 1;
-      trees.push({
-        x: side < 0 ? -20 - rng() * 110 : WIDTH + 20 + rng() * 110,
-        z: -120 + rng() * (LENGTH + 280),
-        size: 0.8 + rng() * 0.7
-      });
+    const clear = (x, z) => !hole.hazards.some(h => inEllipse(h, x, z, 12));
+    const line = hole.line;
+    for (let i = 0; i < line.length; i++) {
+      const a = line[Math.max(0, i - 1)];
+      const b = line[Math.min(line.length - 1, i + 1)];
+      const len = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+      const ax = (b.x - a.x) / len;
+      const az = (b.z - a.z) / len;
+      for (const side of [-1, 1]) {
+        for (let row = 0; row < 2; row++) {
+          if (row && rng() < 0.45) continue;
+          const out = side * (hole.widths[i] + 58 + row * 34 + rng() * 20);
+          const along = (rng() - 0.5) * len * 0.5;
+          const x = line[i].x + az * out + ax * along;
+          const z = line[i].z - ax * out + az * along;
+          if (clear(x, z)) trees.push({ x, z, size: 0.8 + rng() * 0.7 });
+        }
+      }
     }
     for (let i = 0; i < 12; i++) {
       const behindGreen = i % 2 === 0;
@@ -2464,6 +2528,10 @@ h3,
 
     const kind = course ? course.theme : theme(number);
     const hole = { number: holeNumber, difficulty: diff, tee, cup, par, line, halfWidth, hazards: [], theme: kind };
+    // the shapes that make a hole look like itself: the fairway's outline and the green's
+    const look = lookSeed(number);
+    hole.widths = fairwayWidths(look, line, halfWidth);
+    hole.green = greenShape(look);
     // short holes have room for fewer hazards and trees
     const room = par === 3 ? 0.5 : 1;
     const scale = 1 + 0.25 * diff;
@@ -2513,7 +2581,7 @@ h3,
       if (tree) hole.obstacles.push(tree);
     }
 
-    hole.trees = placeTrees(rng);
+    hole.trees = placeTrees(rng, hole);
     return hole;
   }
 
@@ -2530,13 +2598,11 @@ h3,
 
   // True off the fairway, the green and the tee.
   function inRough(hole, x, z) {
-    const cx = x - hole.cup.x;
-    const cz = z - hole.cup.z;
-    if (cx * cx + cz * cz <= GREEN_RADIUS * GREEN_RADIUS) return false;
+    if (onGreen(hole, x, z)) return false;
     const tx = x - hole.tee.x;
     const tz = z - hole.tee.z;
     if (tx * tx + tz * tz <= TEE_RADIUS * TEE_RADIUS) return false;
-    return distanceToLineSq(hole.line, x, z) > hole.halfWidth * hole.halfWidth;
+    return !onFairway(hole, x, z);
   }
 
   // What the ball is on or over: 'water', 'sand', 'rough' or null for short grass.
@@ -2544,7 +2610,7 @@ h3,
     return hazardAt(hole, x, z) || (inRough(hole, x, z) ? 'rough' : null);
   }
 
-  window.Course = { WIDTH, LENGTH, GREEN_RADIUS, difficulty, theme, par, generate, hazardAt, inRough, groundAt };
+  window.Course = { WIDTH, LENGTH, GREEN_RADIUS, difficulty, theme, par, generate, hazardAt, inRough, groundAt, onGreen, greenOutline };
 })();
 </script>
   <script>
@@ -2802,7 +2868,7 @@ h3,
   const MIGRATIONS = {};
   // Which build this is. tools/single-file.js writes the date and commit in
   // here when it builds the game for sharing; run from the project it stays 'dev'.
-  const BUILD = "2026-10-10 (ef75f9d)";
+  const BUILD = "2026-10-10 (b7cf2a6)";
   // Where the newest shared build says which build it is, and where it can be
   // played or downloaded. A shared copy looks there now and then to see
   // whether it has been overtaken; nothing is sent.
@@ -3836,7 +3902,7 @@ h3,
     const p = { x: ball.x, z: ball.z, vx: Math.sin(h0) * speed, vz: Math.cos(h0) * speed };
     const track = [{ x: p.x, z: p.z }];
     for (let i = 0; i < 400; i++) {
-      if (Math.hypot(hole.cup.x - p.x, hole.cup.z - p.z) <= Course.GREEN_RADIUS) {
+      if (Course.onGreen(hole, p.x, p.z)) {
         p.vx += hole.slope.x * BREAK * step;
         p.vz += hole.slope.z * BREAK * step;
       }
@@ -4211,7 +4277,7 @@ h3,
       return;
     }
 
-    if (!airborne && Math.hypot(hole.cup.x - ball.x, hole.cup.z - ball.z) <= Course.GREEN_RADIUS) {
+    if (!airborne && Course.onGreen(hole, ball.x, ball.z)) {
       ball.vx += hole.slope.x * BREAK * STEP;
       ball.vz += hole.slope.z * BREAK * STEP;
     }
@@ -4278,7 +4344,7 @@ h3,
 
   // A green in regulation: on the putting surface (or in the hole) in two fewer strokes than par.
   function checkGreen() {
-    if (strokes <= hole.par - 2 && Math.hypot(hole.cup.x - ball.x, hole.cup.z - ball.z) <= Course.GREEN_RADIUS &&
+    if (strokes <= hole.par - 2 && Course.onGreen(hole, ball.x, ball.z) &&
         !Course.hazardAt(hole, ball.x, ball.z)) greenInReg = true;
   }
 
@@ -4297,7 +4363,7 @@ h3,
     }
     if (shot) {
       const ground = Course.groundAt(hole, ball.x, ball.z);
-      const green = Math.hypot(hole.cup.x - ball.x, hole.cup.z - ball.z) <= Course.GREEN_RADIUS;
+      const green = Course.onGreen(hole, ball.x, ball.z);
       shotResult(Math.round(Math.hypot(shot.x - ball.x, shot.z - ball.z)) + ' from target' + (treeHit ? ', off a tree' : '') +
         ', ' + (ground ? 'in the ' + ground : green ? 'on the green' : 'on the fairway'), ground || treeHit ? 'bad' : '');
       lastResult = (treeHit ? 'Last shot hit a tree and finished ' : 'Last shot finished ') + Math.round(Math.hypot(shot.x - ball.x, shot.z - ball.z)) + ' from its target.';
@@ -5092,6 +5158,19 @@ h3,
     ctx.fillRect(0, HORIZON, VIEW_W, VIEW_H - HORIZON);
   }
 
+  // The row of tee boxes: the one in play, and three forward tees stepping
+  // up the hole from it. They are scenery; the ball is always played from the first.
+  function teeBoxes() {
+    const tee = hole.tee;
+    const next = hole.line[2];
+    const far = Math.hypot(next.x - tee.x, next.z - tee.z) || 1;
+    const boxes = [{ x: tee.x, z: tee.z, w: 14, d: 10, played: true }];
+    for (let i = 1; i <= 3; i++) {
+      boxes.push({ x: tee.x + (next.x - tee.x) / far * (22 + i * 19), z: tee.z + (next.z - tee.z) / far * (22 + i * 19), w: 9, d: 6, played: false });
+    }
+    return boxes;
+  }
+
   function drawGround() {
     // everything in play starts as rough; the fairway is laid over it
     groundPolygon([[0, 0], [WORLD_W, 0], [WORLD_W, WORLD_L], [0, WORLD_L]], PAL[theme.rough]);
@@ -5102,8 +5181,8 @@ h3,
       const a = line[Math.max(0, i - 1)];
       const b = line[Math.min(line.length - 1, i + 1)];
       const len = Math.hypot(b.x - a.x, b.z - a.z);
-      const nx = (b.z - a.z) / len * hole.halfWidth;
-      const nz = -(b.x - a.x) / len * hole.halfWidth;
+      const nx = (b.z - a.z) / len * hole.widths[i];
+      const nz = -(b.x - a.x) / len * hole.widths[i];
       return { left: [p.x - nx, p.z - nz], right: [p.x + nx, p.z + nz] };
     });
     const across = (edge, t) => [edge.left[0] + (edge.right[0] - edge.left[0]) * t, edge.left[1] + (edge.right[1] - edge.left[1]) * t];
@@ -5118,8 +5197,12 @@ h3,
 
     const tee = hole.tee;
     groundPolygon(ellipsePoints(tee.x, tee.z, 25, 25), PAL.fairwayDark);
-    groundPolygon([[tee.x - 14, tee.z - 10], [tee.x + 14, tee.z - 10], [tee.x + 14, tee.z + 10], [tee.x - 14, tee.z + 10]], PAL.fairway, PAL.far);
-    groundPolygon(ellipsePoints(hole.cup.x, hole.cup.z, Course.GREEN_RADIUS, Course.GREEN_RADIUS), PAL.green, PAL.fairwayDark);
+    // the tee in play, and the forward tees ahead of it, each a mown box
+    for (const box of teeBoxes()) {
+      groundPolygon([[box.x - box.w, box.z - box.d], [box.x + box.w, box.z - box.d], [box.x + box.w, box.z + box.d], [box.x - box.w, box.z + box.d]],
+        box.played ? PAL.fairway : PAL.fairwayDark, PAL.far);
+    }
+    groundPolygon(Course.greenOutline(hole), PAL.green, PAL.fairwayDark);
 
     // Edges first and then the fills over them, so that a lake made of
     // several ellipses run together is drawn as one piece of water.
@@ -5627,7 +5710,7 @@ h3,
     if (x < 0 || x > WORLD_W || z < 0 || z > WORLD_L) return GROUND.out;
     const ground = Course.groundAt(hole, x, z);
     if (ground) return GROUND[ground];
-    if (Math.hypot(x - hole.cup.x, z - hole.cup.z) <= Course.GREEN_RADIUS) return GROUND.green;
+    if (Course.onGreen(hole, x, z)) return GROUND.green;
     return (Math.floor(x / MAP_CHECK) + Math.floor(z / MAP_CHECK)) & 1 ? GROUND.dark : GROUND.light;
   }
 
@@ -5753,6 +5836,15 @@ h3,
 
     dot(at(hole.tee.x - 12, hole.tee.z), PAL.white);
     dot(at(hole.tee.x + 12, hole.tee.z), PAL.white);
+    // the forward tees, as small mown squares up the hole from the tee
+    for (const box of teeBoxes()) {
+      if (box.played) continue;
+      const p = at(box.x, box.z);
+      ctx.fillStyle = PAL.far;
+      ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
+      ctx.fillStyle = PAL.fairway;
+      ctx.fillRect(p.x - 1, p.y - 1, 2, 2);
+    }
     for (const tree of hole.trees) icon(Sprites.ICONS.tree, tree.x, tree.z);
     // trees nearer the bottom of the map overlap the ones above them
     for (const tree of hole.obstacles.slice().sort((a, b) => a.x - b.x)) icon(Sprites.ICONS.conifer, tree.x, tree.z);
