@@ -941,6 +941,7 @@ h3,
     }
   ];
 
+  const CONTRACT_LEVEL = 0.005;       // more on every contract's reward for each overall level gained
   const PERK_LEVELS = [20, 40, 60];   // main attribute levels that unlock its first, second and third perks
 
   const SUBS = [];
@@ -986,6 +987,8 @@ h3,
     };
     // whether a main attribute's perk is unlocked: tier 0 (the first, when left out), 1 or 2
     const perk = (id, tier) => groupLevel(attrs, GROUPS.find(item => item.id === id)) >= PERK_LEVELS[tier || 0];
+    // overall levels gained since the start: a better golfer is offered better contracts
+    const gained = SUBS.reduce((sum, sub) => sum + attrs[sub.id].level - 1, 0);
     const aimMult = Math.pow(0.94, n('aimAccuracy'));
     const gripMult = Math.pow(0.95, n('grip'));
     const lieFade = Math.pow(0.93, n('recovery'));
@@ -1037,6 +1040,7 @@ h3,
       // Intelligence
       coinMult: 1 + 0.03 * n('negotiation'),
       contractMult: 1 + 0.04 * n('negotiation'),                        // contract rewards on new offers
+      contractLevel: 1 + CONTRACT_LEVEL * gained,                       // and again for the golfer's overall level
       sponsorMult: 1 + 0.04 * n('negotiation'),                         // sponsor pay on new offers
       appearanceFee: Math.min(0.15, 0.02 + 0.006 * n('negotiation')),   // chance a hole's coins are doubled
       feeMult: perk('intelligence', 2) ? 3 : 2,                         // third perk: tripled instead
@@ -1067,7 +1071,7 @@ h3,
       case 'shotCalc': return 'Ignores hazards on ' + percent(fx.misread) + ' of shots. Free drop on ' + percent(fx.freeDrop) + ' of water balls';
       case 'landingPrediction': return 'Misjudges spin and bend by about ' + percent(fx.spinSigma) + '. Pin high on ' + percent(fx.pinHigh) + ' of shots at the flag';
       case 'windReading': return 'Allows for ' + percent(fx.windRead) + ' of the wind. Perfect read on ' + percent(fx.perfectRead) + ' of windy shots';
-      case 'negotiation': return 'Hole coins +' + percent(fx.coinMult - 1) + ', contract and sponsor offers +' + percent(fx.contractMult - 1) + '. Haggling works ' + percent(fx.haggle) + ' of the time. Appearance fee (' + (fx.feeMult === 3 ? 'triple' : 'double') + ' coins) on ' + percent(fx.appearanceFee) + ' of holes';
+      case 'negotiation': return 'Hole coins +' + percent(fx.coinMult - 1) + ', contract and sponsor offers +' + percent(fx.sponsorMult - 1) + '. Haggling works ' + percent(fx.haggle) + ' of the time. Appearance fee (' + (fx.feeMult === 3 ? 'triple' : 'double') + ' coins) on ' + percent(fx.appearanceFee) + ' of holes';
       case 'composure': return 'Momentum: -' + (fx.hotStreak * 100).toFixed(1) + '% error per point when hot, +' + (fx.coldStreak * 100).toFixed(1) + '% when cold. Nerves: +' + (fx.nerves * 100).toFixed(1) + '% error on a tournament\'s last three holes';
       case 'study': return 'Experience +' + percent(fx.expMult - 1) + '. Breakthrough (double experience) on ' + percent(fx.breakthrough) + ' of holes';
       default: return '';
@@ -2647,7 +2651,7 @@ h3,
   const MIGRATIONS = {};
   // Which build this is. tools/single-file.js writes the date and commit in
   // here when it builds the game for sharing; run from the project it stays 'dev'.
-  const BUILD = "2026-10-10 (03583bf)";
+  const BUILD = "2026-10-10 (2610c1d)";
   // Where "Send feedback" opens a new report, already filled in.
   const FEEDBACK_URL = 'https://github.com/Shaggy405/idle-golf-play/issues/new';
   const PREFS_KEY = 'idle-golf-prefs-v1';   // which tab is open and the play speed; not part of the save
@@ -3168,7 +3172,7 @@ h3,
     const income = 1 + LEGACY_COINS * legacy;
     s.expMult *= 1 + LEGACY_XP * legacy;
     s.coinMult *= income;
-    s.contractMult *= income;
+    s.contractMult *= income * s.contractLevel;   // contracts are also worth more to a golfer of a higher overall level
     s.sponsorMult *= income;
     return s;
   }
@@ -6051,6 +6055,10 @@ h3,
         actionButton('Drop', true, () => Career.dropContract(career))));
     }
     el.contracts.appendChild(make('p', 'label', active ? 'On offer (finish or drop the active one first)' : 'On offer'));
+    if (stats.contractLevel > 1.004) {
+      el.contracts.appendChild(make('p', 'muted', 'New offers pay ' + Math.round((stats.contractLevel - 1) * 100) + '% more for the golfer\'s overall level (' +
+        Attributes.rank(save.attrs).level + '), and more with every level gained.'));
+    }
     career.offers.forEach((offer, index) => {
       const buttons = make('div', 'deal-buttons');
       buttons.appendChild(haggleButton(offer, 'a contract'));
