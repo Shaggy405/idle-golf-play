@@ -170,6 +170,10 @@ select {
   margin-bottom: 10px;
 }
 
+.tab[hidden] {
+  display: none;
+}
+
 .tab {
   flex: 1;
   padding: 8px 10px;
@@ -805,6 +809,7 @@ h3,
         <label class="toggle"><input type="checkbox" id="reduce-motion"> Reduce motion</label>
         <label class="toggle"><input type="checkbox" id="hide-minimap"> Hide minimap</label>
         <label class="toggle"><input type="checkbox" id="auto-update"> Update automatically</label>
+        <label class="toggle"><input type="checkbox" id="show-moments"> Moments tab</label>
       </div>
 
       <p id="message" class="message">Teeing off…</p>
@@ -813,11 +818,6 @@ h3,
       <div class="card shots-card">
         <h3>Shots this hole</h3>
         <div id="shots-list"><p class="muted">Each shot's plan and how it turned out.</p></div>
-      </div>
-
-      <div class="card">
-        <h3>Recent moments</h3>
-        <div id="feed-list"><p class="muted">Signature moments, level-ups, perks and deals show up here.</p></div>
       </div>
     </div>
 
@@ -830,6 +830,7 @@ h3,
         <button class="tab" type="button" data-tab="legacy">Legacy</button>
         <button class="tab" type="button" data-tab="stats">Stats</button>
         <button class="tab" type="button" data-tab="awards">Awards</button>
+        <button class="tab" type="button" data-tab="moments" hidden>Moments</button>
       </nav>
 
       <section class="panel" data-panel="golfer">
@@ -887,6 +888,13 @@ h3,
         <div class="card">
           <h3>Statistics</h3>
           <div id="stats-box"></div>
+        </div>
+      </section>
+
+      <section class="panel" data-panel="moments" hidden>
+        <div class="card">
+          <h3>Recent moments</h3>
+          <div id="feed-list"><p class="muted">Signature moments, level-ups, perks and deals show up here.</p></div>
         </div>
       </section>
 
@@ -1289,8 +1297,8 @@ h3,
     { name: 'Local Open', fee: 3, mean: 9, sd: 3, course: 'Pine Hollow', theme: 'parkland', difficulty: 0.35 },
     { name: 'Regional Classic', fee: 5, mean: 8, sd: 3, course: 'Blackwood', theme: 'forest', difficulty: 0.55 },
     { name: 'National Championship', fee: 8, mean: -1.6, sd: 2.5, course: 'Red Mesa', theme: 'desert', difficulty: 0.75 },
-    { name: 'The Major', fee: 12, mean: -2.2, sd: 2.5, course: 'St Brannoch', theme: 'links', difficulty: 0.9 },
-    { name: 'Legends Cup', fee: 18, mean: -3, sd: 2, course: 'Magnolia Hill', theme: 'parkland', difficulty: 1 }
+    { name: 'The Major', fee: 12, mean: -1.2, sd: 2.5, course: 'St Brannoch', theme: 'links', difficulty: 0.9 },
+    { name: 'Legends Cup', fee: 18, mean: -3.5, sd: 2, course: 'Magnolia Hill', theme: 'parkland', difficulty: 1 }
   ];
   const COURSE_SEED = 900000;             // tournament courses are laid out from seeds far above any hole number
   const TOUR_CLOSING = 3;                 // holes at the end of a tournament played under pressure
@@ -2386,7 +2394,7 @@ h3,
     const cup = { x: 70 + rng() * (WIDTH - 140), z: 0 };
     const across = cup.x - tee.x;
     cup.z = Math.min(LENGTH - 50, tee.z + Math.sqrt(Math.max(reach * reach - across * across, 150 * 150)));
-    const halfWidth = 60 - 22 * diff;
+    const halfWidth = 72 - 14 * diff;   // 144 wide on the first hole, 116 at full difficulty
 
     // doglegs: rare and gentle early on, common and sharp later; par 3s are straight
     const straight = rng() < 0.4 - 0.3 * diff || par === 3;
@@ -2728,7 +2736,7 @@ h3,
   const MIGRATIONS = {};
   // Which build this is. tools/single-file.js writes the date and commit in
   // here when it builds the game for sharing; run from the project it stays 'dev'.
-  const BUILD = "2026-10-10 (b3f60e0)";
+  const BUILD = "2026-10-10 (7464c31)";
   // Where the newest shared build says which build it is, and where it can be
   // played or downloaded. A shared copy looks there now and then to see
   // whether it has been overtaken; nothing is sent.
@@ -2994,6 +3002,7 @@ h3,
     reduceMotion: document.getElementById('reduce-motion'),
     hideMinimap: document.getElementById('hide-minimap'),
     autoUpdate: document.getElementById('auto-update'),
+    showMoments: document.getElementById('show-moments'),
     update: document.getElementById('update'),
     updateText: document.getElementById('update-text'),
     updateNow: document.getElementById('update-now'),
@@ -5200,6 +5209,8 @@ h3,
   }
 
   function drawFlag() {
+    // the flag is out of the hole while the golfer is putting, and back in once the ball has dropped
+    if (plan && plan.putt && phase !== 'holed') return;
     const base = project(hole.cup.x, hole.cup.z, 0);
     if (!base) return;
     const s = base.s;
@@ -6877,6 +6888,19 @@ h3,
     return found;
   }
 
+  // The log of recent moments has a tab of its own, which is only there if the player asks for it.
+  function setMoments(on) {
+    el.showMoments.checked = on;
+    const tab = Array.from(el.tabs.querySelectorAll('.tab')).find(item => item.dataset.tab === 'moments');
+    if (!tab) return;
+    tab.hidden = !on;
+    // taking the tab away while it is open goes back to the golfer
+    if (!on && tab.classList.contains && tab.classList.contains('on')) {
+      showTab('golfer');
+      prefs.tab = 'golfer';
+    }
+  }
+
   // 2x has to be bought in the legacy shop; until then the button is there but locked.
   function setSpeed(value) {
     const unlocked = save.legacy.shop.fastPlay > 0;
@@ -7016,6 +7040,11 @@ h3,
     if (onTheWeb) reloadForUpdate(true);
     else if (window.open) window.open(PLAY_URL, '_blank', 'noopener');
   });
+  el.showMoments.addEventListener('change', () => {
+    prefs.moments = el.showMoments.checked;
+    setMoments(prefs.moments);
+    savePrefs();
+  });
   el.autoUpdate.addEventListener('change', () => {
     prefs.autoUpdate = el.autoUpdate.checked;
     savePrefs();
@@ -7066,6 +7095,7 @@ h3,
   hideMinimap = prefs.hideMinimap === true;
   el.hideMinimap.checked = hideMinimap;
   el.autoUpdate.checked = prefs.autoUpdate !== false;
+  setMoments(prefs.moments === true);
 
   playTimeAway(() => {
     updateAttributes();
