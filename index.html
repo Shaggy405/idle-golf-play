@@ -1200,9 +1200,9 @@ h3,
     { name: 'Club', bonus: 1, cost: 250 },
     { name: 'Pro', bonus: 2, cost: 1250 },
     { name: 'Tour', bonus: 3, cost: 7500 },
-    { name: 'Elite', bonus: 4, cost: 50000 },
-    { name: 'Legend', bonus: 5, cost: 300000 },
-    { name: 'Mythic', bonus: 6, cost: 1800000 }
+    { name: 'Elite', bonus: 4, cost: 60000 },
+    { name: 'Legend', bonus: 5, cost: 360000 },
+    { name: 'Mythic', bonus: 6, cost: 2520000 }
   ];
 
   // Contracts are sized to the golfer's recent form, so they carry the same
@@ -2868,7 +2868,7 @@ h3,
   const MIGRATIONS = {};
   // Which build this is. tools/single-file.js writes the date and commit in
   // here when it builds the game for sharing; run from the project it stays 'dev'.
-  const BUILD = "2026-10-10 (b7cf2a6)";
+  const BUILD = "2026-10-10 (fbd5390)";
   // Where the newest shared build says which build it is, and where it can be
   // played or downloaded. A shared copy looks there now and then to see
   // whether it has been overtaken; nothing is sent.
@@ -2901,7 +2901,7 @@ h3,
   const MOMENTUM_MIN = -3;       // as cold as the golfer gets
   const MOMENTUM_MAX = 5;        // and as hot
   const LEGACY_LEVELS = 8;       // sub-attribute levels gained per legacy point on retiring
-  const ACADEMY_COST = 500000;   // coins to fund this career's first junior academy; each one after costs twice the last
+  const ACADEMY_COST = 700000;   // coins to fund this career's first junior academy; each one after costs twice the last
   const LEGACY_XP = 0.03;        // experience bonus per effective legacy point
   const LEGACY_COINS = 0.02;     // income bonus per effective legacy point
   const LEGACY_FULL = 30;        // lifetime points that count in full; beyond this the bonus tapers
