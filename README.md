@@ -4,7 +4,9 @@ A golf career that plays itself. The golfer plays hole after hole on their own; 
 
 **Play it now: https://shaggy405.github.io/idle-golf-play/**
 
-Or download it and play offline: get `idle-golf.html` from the [latest release](https://github.com/Shaggy405/idle-golf-play/releases/latest) and double-click it. It is one file, it installs nothing, and it does not go online.
+Or download it and play offline: get `idle-golf.html` from the [latest release](https://github.com/Shaggy405/idle-golf-play/releases/latest) and double-click it. It is one file and it installs nothing.
+
+The game keeps itself up to date. The website loads a new build by itself between holes (there is an "Update automatically" switch under the course if you would rather it did not), and a downloaded copy tells you when there is a newer one to fetch. To do that it reads one small file from this site every few minutes; it sends nothing.
 
 Your progress is saved in the browser you play in. "Export save" and "Import save" at the foot of the page carry a game from one place to another, for instance from the website to the downloaded file.
 

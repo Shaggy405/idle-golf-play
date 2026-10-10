@@ -772,6 +772,11 @@ h3,
         <div class="stat"><span class="label">Aces</span><span id="aces">0</span></div>
       </header>
 
+      <section id="update" class="away" hidden>
+        <p id="update-text"></p>
+        <button id="update-now" class="action" type="button">Reload now</button>
+      </section>
+
       <section id="away" class="away" hidden>
         <p id="away-text"></p>
         <button id="away-close" class="action" type="button">OK</button>
@@ -799,6 +804,7 @@ h3,
       <div id="settings" class="settings">
         <label class="toggle"><input type="checkbox" id="reduce-motion"> Reduce motion</label>
         <label class="toggle"><input type="checkbox" id="hide-minimap"> Hide minimap</label>
+        <label class="toggle"><input type="checkbox" id="auto-update"> Update automatically</label>
       </div>
 
       <p id="message" class="message">Teeing off…</p>
@@ -942,7 +948,7 @@ h3,
     }
   ];
 
-  const CONTRACT_LEVEL = 0.005;       // more on every contract's reward for each overall level gained
+  const OFFER_LEVEL = 0.005;          // more on every contract's reward and sponsor's pay for each overall level gained
   const PERK_LEVELS = [20, 40, 60];   // main attribute levels that unlock its first, second and third perks
 
   const SUBS = [];
@@ -988,7 +994,7 @@ h3,
     };
     // whether a main attribute's perk is unlocked: tier 0 (the first, when left out), 1 or 2
     const perk = (id, tier) => groupLevel(attrs, GROUPS.find(item => item.id === id)) >= PERK_LEVELS[tier || 0];
-    // overall levels gained since the start: a better golfer is offered better contracts
+    // overall levels gained since the start: a better golfer is offered better contracts and sponsors
     const gained = SUBS.reduce((sum, sub) => sum + attrs[sub.id].level - 1, 0);
     const aimMult = Math.pow(0.94, n('aimAccuracy'));
     const gripMult = Math.pow(0.95, n('grip'));
@@ -1041,7 +1047,8 @@ h3,
       // Intelligence
       coinMult: 1 + 0.03 * n('negotiation'),
       contractMult: 1 + 0.04 * n('negotiation'),                        // contract rewards on new offers
-      contractLevel: 1 + CONTRACT_LEVEL * gained,                       // and again for the golfer's overall level
+      offerMult: 1 + 0.04 * n('negotiation'),                           // what Negotiation alone adds to both, for its card
+      offerLevel: 1 + OFFER_LEVEL * gained,                             // and what the golfer's overall level adds on top
       sponsorMult: 1 + 0.04 * n('negotiation'),                         // sponsor pay on new offers
       appearanceFee: Math.min(0.15, 0.02 + 0.006 * n('negotiation')),   // chance a hole's coins are doubled
       feeMult: perk('intelligence', 2) ? 3 : 2,                         // third perk: tripled instead
@@ -1072,7 +1079,7 @@ h3,
       case 'shotCalc': return 'Ignores hazards on ' + percent(fx.misread) + ' of shots. Free drop on ' + percent(fx.freeDrop) + ' of water balls';
       case 'landingPrediction': return 'Misjudges spin and bend by about ' + percent(fx.spinSigma) + '. Pin high on ' + percent(fx.pinHigh) + ' of shots at the flag';
       case 'windReading': return 'Allows for ' + percent(fx.windRead) + ' of the wind. Perfect read on ' + percent(fx.perfectRead) + ' of windy shots';
-      case 'negotiation': return 'Hole coins +' + percent(fx.coinMult - 1) + ', contract and sponsor offers +' + percent(fx.sponsorMult - 1) + '. Haggling works ' + percent(fx.haggle) + ' of the time. Appearance fee (' + (fx.feeMult === 3 ? 'triple' : 'double') + ' coins) on ' + percent(fx.appearanceFee) + ' of holes';
+      case 'negotiation': return 'Hole coins +' + percent(fx.coinMult - 1) + ', contract and sponsor offers +' + percent(fx.offerMult - 1) + '. Haggling works ' + percent(fx.haggle) + ' of the time. Appearance fee (' + (fx.feeMult === 3 ? 'triple' : 'double') + ' coins) on ' + percent(fx.appearanceFee) + ' of holes';
       case 'composure': return 'Momentum: -' + (fx.hotStreak * 100).toFixed(1) + '% error per point when hot, +' + (fx.coldStreak * 100).toFixed(1) + '% when cold. Nerves: +' + (fx.nerves * 100).toFixed(1) + '% error on a tournament\'s last three holes';
       case 'study': return 'Experience +' + percent(fx.expMult - 1) + '. Breakthrough (double experience) on ' + percent(fx.breakthrough) + ' of holes';
       default: return '';
@@ -1164,6 +1171,11 @@ h3,
     { id: 'balls', name: 'Golf balls', sub: 'landingPrediction', boosts: 'Landing prediction' },
     { id: 'windGauge', name: 'Wind gauge', sub: 'windReading', boosts: 'Wind reading' }
   ];
+  // A caddie is hired, then made better five times. Each improvement adds
+  // CADDIE_PAY to the coins from every hole. CADDIE_COSTS is what hiring
+  // costs, then each improvement in turn.
+  const CADDIE_COSTS = [1000, 5000, 25000, 100000, 400000, 1500000];
+  const CADDIE_PAY = 0.02;
   // What auto-buy can be told to get first: the cheapest upgrade going, the
   // clubs, everything that is not a club, or any one piece.
   const GEAR_FIRST = [
@@ -1257,6 +1269,11 @@ h3,
   const HAGGLE_UP = [1.1, 1.25];
   const HAGGLE_DOWN = 0.85;
   const HAGGLE_AUTO = 0.5;
+  // A contract is never lost. One that can no longer be finished inside its
+  // deadline carries on with no deadline until it is done, and pays LATE_PAY
+  // of its reward. A score over nine that is missed is tried again over the
+  // next nine, on the same terms.
+  const LATE_PAY = 0.5;
   const TARGET_CAP = 30;         // most holes a contract will ask for
   const FORM_FLOOR = 0.12;       // contracts needing something rarer than this are not offered
   const DEADLINE_CAP = 45;
@@ -1353,6 +1370,7 @@ h3,
     return {
       gear, contract: null, offers: [], sponsor: null, sponsor2: null, sponsorOffer: null, nextSponsorIn: 4, auto: false, autoRisk: 'long', autoGear: false, autoGearFirst: 'cheapest',
       tournament: null, tour: freshTour(), form: freshForm(), season: freshSeason(1, 0),
+      caddie: 0,                 // 0 for no caddie, 1 once hired, then one more for each improvement
       bench: [],                 // names of clubs the player has left out of the bag
       fame: 0,                   // standing with sponsors, from tournament finishes
       academy: 0                 // junior academies funded this career; each is a legacy point on retiring
@@ -1450,6 +1468,7 @@ h3,
       c.tour.auto = tour.auto === true;
     }
     if (Number.isInteger(raw.academy) && raw.academy >= 0) c.academy = Math.min(40, raw.academy);
+    if (Number.isInteger(raw.caddie) && raw.caddie >= 0) c.caddie = Math.min(CADDIE_COSTS.length, raw.caddie);
     if (Number.isFinite(raw.fame) && raw.fame >= 0) c.fame = Math.min(FAME_MAX, raw.fame);
     if (Array.isArray(raw.bench)) c.bench = raw.bench.filter(name => typeof name === 'string' && name.length <= 20).slice(0, 12);
     const season = raw.season;
@@ -1521,6 +1540,27 @@ h3,
     return cost;
   }
 
+  // ---------- the caddie ----------
+
+  // The share a caddie adds to the coins from every hole: nothing when first hired.
+  function caddieBonus(career) {
+    return CADDIE_PAY * Math.max(0, career.caddie - 1);
+  }
+
+  // What hiring the caddie or their next improvement costs after a discount (0..1), or null when there is nothing more to buy.
+  function caddieCost(career, discount) {
+    const cost = CADDIE_COSTS[career.caddie];
+    return cost === undefined ? null : Math.round(cost * (1 - (discount || 0)));
+  }
+
+  // Hires the caddie or pays for their next improvement. Returns the coins spent, or 0 if it can't be bought.
+  function buyCaddie(career, coins, discount) {
+    const cost = caddieCost(career, discount);
+    if (cost === null || coins < cost) return 0;
+    career.caddie++;
+    return cost;
+  }
+
   // Whether auto-buy has been told to get this piece of equipment first.
   function putFirst(career, g) {
     const first = career.autoGearFirst;
@@ -1531,7 +1571,9 @@ h3,
   // until the next one cannot be afforded. That is always the cheapest
   // upgrade there is, unless some equipment has been put first: those pieces
   // are kept a tier ahead of the rest, and the coins are saved for them when
-  // it is their turn. Returns the coins spent and a note for each purchase.
+  // it is their turn. The caddie is bought in the same way whenever they
+  // cost no more than the equipment next in line.
+  // Returns the coins spent and a note for each purchase.
   function autoBuy(career, coins, discount) {
     const out = { spent: 0, notes: [] };
     for (;;) {
@@ -1541,6 +1583,13 @@ h3,
         if (cost === null) continue;
         const turn = career.gear[g.id] - (putFirst(career, g) ? 1 : 0);
         if (!pick || turn < pick.turn || (turn === pick.turn && cost < pick.cost)) pick = { g, cost, turn };
+      }
+      const caddie = caddieCost(career, discount);
+      if (caddie !== null && (!pick || caddie <= pick.cost)) {
+        if (caddie > coins - out.spent) return out;
+        out.spent += buyCaddie(career, coins - out.spent, discount);
+        out.notes.push((career.caddie === 1 ? 'Hired a caddie' : 'Caddie improved to +' + Math.round(caddieBonus(career) * 100) + '%') + ' -' + caddie.toLocaleString());
+        continue;
       }
       if (!pick || pick.cost > coins - out.spent) return out;
       out.spent += buyGear(career, pick.g.id, coins - out.spent, discount);
@@ -1696,13 +1745,18 @@ h3,
     return s.perHole.toLocaleString() + ' coins per hole' + SPONSOR_KINDS[s.kind].text;
   }
 
+  // How long a deal runs, in words: every hole counts toward a flat deal, and only the holes that pay toward the rest.
+  function sponsorHoles(s) {
+    return s.holes + (s.kind === 'flat' ? '' : ' paying') + (s.holes === 1 ? ' hole' : ' holes');
+  }
+
   // Where the next sponsor signed would go, 'sponsor' or 'sponsor2', when
   // `slots` deals can run at once: an empty place if there is one, otherwise
   // in place of the deal with less left to pay.
   function sponsorSlot(career, slots) {
     if (!career.sponsor || !(slots > 1)) return 'sponsor';
     if (!career.sponsor2) return 'sponsor2';
-    return sponsorValue(career.sponsor2, career.form) < sponsorValue(career.sponsor, career.form) ? 'sponsor2' : 'sponsor';
+    return sponsorRate(career.sponsor2, career.form) < sponsorRate(career.sponsor, career.form) ? 'sponsor2' : 'sponsor';
   }
 
   // Signs the offer on the table, into an empty place or over the deal
@@ -1742,14 +1796,21 @@ h3,
     return c.reward * (Number.isFinite(c.odds) ? c.odds : 1) / (c.holesLeft === null ? c.target : c.holesLeft);
   }
 
-  // Rough coins a sponsor deal still has to pay, going by how often the golfer's form says it will.
-  function sponsorValue(s, form) {
-    return s.perHole * s.holes * SPONSOR_KINDS[s.kind].rate(form);
+  // What a sponsor deal is worth for each hole played, going by how often the golfer's form says it will pay.
+  // Every deal pays its full number of times in the end, so this is what tells one from another.
+  function sponsorRate(s, form) {
+    return s.perHole * SPONSOR_KINDS[s.kind].rate(form);
+  }
+
+  // The same for an offer, with its signing bonus spread over the holes the deal should last.
+  function offerRate(s, form) {
+    const rate = SPONSOR_KINDS[s.kind].rate(form);
+    return s.perHole * rate + s.signing * rate / s.holes;
   }
 
   // Takes the best contract on offer that its risk setting allows if none is
   // active (waiting for a later offer if none does), and signs the sponsor
-  // offer if it beats what is left of the current deal. With a good enough
+  // offer if there is room for it or it is worth more a hole than the deal it would replace. With a good enough
   // chance (0..1) it haggles over each first. slots is how many sponsors
   // can be held at once. Returns the signing
   // coins, negotiation experience and notes for the log.
@@ -1776,7 +1837,7 @@ h3,
     const offer = career.sponsorOffer;
     talk(offer, offer ? offer.name : '');
     const held = career[sponsorSlot(career, slots)];
-    if (offer && (!held || sponsorValue(offer, career.form) + offer.signing > sponsorValue(held, career.form))) {
+    if (offer && (!held || offerRate(offer, career.form) > sponsorRate(held, career.form))) {
       out.coins += acceptSponsor(career, slots);
       out.xp += 4;
       out.notes.push('Signed ' + offer.name);
@@ -1958,10 +2019,10 @@ h3,
     for (const key of ['sponsor', 'sponsor2']) {
       const s = career[key];
       if (!s) continue;
-      if (SPONSOR_KINDS[s.kind].test(result)) {
-        out.coins += s.perHole;
-        out.notes.push(s.name + ' +' + s.perHole.toLocaleString());
-      }
+      // a deal is for so many paying holes: a hole that does not pay does not use one up
+      if (!SPONSOR_KINDS[s.kind].test(result)) continue;
+      out.coins += s.perHole;
+      out.notes.push(s.name + ' +' + s.perHole.toLocaleString());
       if (--s.holes <= 0) {
         out.notes.push(s.name + ' deal ended');
         career[key] = null;
@@ -1979,9 +2040,17 @@ h3,
       if (round) c.total += (result.holed ? result.strokes : Math.max(result.strokes, 10)) - result.par;
       if (CONTRACT_TYPES[c.type].test(result)) c.progress++;
       if (c.holesLeft !== null) c.holesLeft--;
+      // the deadline has gone, or the score was missed: from here the contract pays less, once
+      const late = () => {
+        if (!c.late) c.reward = Math.max(1, Math.round(c.reward * LATE_PAY));
+        c.late = true;
+      };
       if (c.progress >= c.target && round && c.total > c.limit) {
-        out.notes.push('Contract failed');
-        career.contract = null;
+        late();
+        c.progress = 0;
+        c.total = 0;
+        c.holesLeft = c.target;
+        out.notes.push('Contract missed: it starts again, now for ' + c.reward.toLocaleString());
       } else if (c.progress >= c.target) {
         out.coins += c.reward;
         out.xp += 6;
@@ -1989,8 +2058,9 @@ h3,
         out.notes.push('Contract complete +' + c.reward.toLocaleString());
         career.contract = null;
       } else if (c.holesLeft !== null && c.holesLeft < c.target - c.progress) {
-        out.notes.push('Contract failed');
-        career.contract = null;
+        late();
+        c.holesLeft = null;
+        out.notes.push('Contract running late: it carries on, now for ' + c.reward.toLocaleString());
       }
     }
 
@@ -2075,9 +2145,9 @@ h3,
 
   window.Career = {
     GEAR, TIERS, fresh, sanitize,
-    gearBonus, clubBonus, gearEffect, nextTier, gearCost, buyGear, autoBuy, GEAR_FIRST,
+    gearBonus, clubBonus, gearEffect, nextTier, gearCost, buyGear, autoBuy, GEAR_FIRST, CADDIE_COSTS, caddieBonus, caddieCost, buyCaddie,
     AUTO_RISKS, fillOffers, contractText, stakeName, acceptContract, dropContract, haggle, HAGGLE_AUTO,
-    sponsorTerms, sponsorSlot, sponsorValue, fameMult, FAME_MAX, acceptSponsor, declineSponsor, autoPick,
+    sponsorTerms, sponsorHoles, sponsorSlot, sponsorRate, LATE_PAY, fameMult, FAME_MAX, acceptSponsor, declineSponsor, autoPick,
     TOURS, TOUR_HOLES, TOUR_PRIZES, MAJOR, tournamentFee, enterTournament, tourHole, standings, rivalStyle, SEASON_LENGTH, SEASON_PRIZES, seasonTable, ordinal, underPressure, autoTier, placeText, theName,
     afterHole
   };
@@ -2628,10 +2698,16 @@ h3,
     conifer: ['..k..', '.kpk.', '.kpk.', 'kpppk', 'kkkkk', '..n..'],
     tree: ['.kkk.', 'kdldk', 'kdddk', '.kkk.'],
     flag: ['wrrr', 'wrrr', 'w...', 'w...', 'w...', 'k...'],
-    golfer: ['.w.', '.s.', 'rrr', '.b.', '.b.']
+    golfer: ['.w.', '.s.', 'rrr', '.b.', '.b.'],
+    caddie: ['.p.', '.s.', 'www', '.w.', '.w.']
   };
 
-  window.Sprites = { WIDTH, HEIGHT, ANCHOR, UNIT, INK, POSES, ICONS };
+  // The caddie is the golfer walking, seen from behind, in other clothes:
+  // white overalls and a green cap. CADDIE_INK says which letter to read each
+  // of the golfer's as. The bag is drawn beside them.
+  const CADDIE_INK = { r: 'w', b: 'w', w: 'p' };
+
+  window.Sprites = { WIDTH, HEIGHT, ANCHOR, UNIT, INK, POSES, ICONS, CADDIE_INK };
 })();
 </script>
   <script>
@@ -2652,7 +2728,13 @@ h3,
   const MIGRATIONS = {};
   // Which build this is. tools/single-file.js writes the date and commit in
   // here when it builds the game for sharing; run from the project it stays 'dev'.
-  const BUILD = "2026-10-10 (4e8fef3)";
+  const BUILD = "2026-10-10 (b3f60e0)";
+  // Where the newest shared build says which build it is, and where it can be
+  // played or downloaded. A shared copy looks there now and then to see
+  // whether it has been overtaken; nothing is sent.
+  const LATEST_URL = 'https://shaggy405.github.io/idle-golf-play/version.txt';
+  const PLAY_URL = 'https://shaggy405.github.io/idle-golf-play/';
+  const UPDATE_EVERY = 5 * 60 * 1000;   // milliseconds between looks
   // Where "Send feedback" opens a new report, already filled in.
   const FEEDBACK_URL = 'https://github.com/Shaggy405/idle-golf-play/issues/new';
   const PREFS_KEY = 'idle-golf-prefs-v1';   // which tab is open and the play speed; not part of the save
@@ -2911,6 +2993,10 @@ h3,
     awards: document.getElementById('awards-box'),
     reduceMotion: document.getElementById('reduce-motion'),
     hideMinimap: document.getElementById('hide-minimap'),
+    autoUpdate: document.getElementById('auto-update'),
+    update: document.getElementById('update'),
+    updateText: document.getElementById('update-text'),
+    updateNow: document.getElementById('update-now'),
     importSave: document.getElementById('import-save'),
     importFile: document.getElementById('import-file'),
     strokes: document.getElementById('strokes'),
@@ -2993,6 +3079,9 @@ h3,
   let view = 'course';           // what the canvas shows: 'course', 'map' or 'card'
   let overlayNext = null;        // a second screen waiting its turn behind the one held up: { kind, seconds }
   let seasonFinal = null;        // the season just finished, for its screen: { number, rank, prize, table }
+  // A copy on the web can be replaced where it stands by loading the page again; a downloaded file cannot.
+  const onTheWeb = /^https?:$/.test(window.location ? window.location.protocol : '');
+  let newerBuild = null;         // the shared build that has overtaken this one, once seen
   let overlay = null;            // a screen held over the chosen view for a while: { kind, until }
   let card = null;               // the scorecard for the nine holes in progress
   let theme = THEMES.parkland;   // the look of the hole in play
@@ -3174,8 +3263,10 @@ h3,
     const income = 1 + LEGACY_COINS * legacy;
     s.expMult *= 1 + LEGACY_XP * legacy;
     s.coinMult *= income;
-    s.contractMult *= income * s.contractLevel;   // contracts are also worth more to a golfer of a higher overall level
-    s.sponsorMult *= income;
+    s.offerMult *= income;
+    // contracts and sponsors are also worth more to a golfer of a higher overall level
+    s.contractMult *= income * s.offerLevel;
+    s.sponsorMult *= income * s.offerLevel;
     return s;
   }
 
@@ -4204,7 +4295,7 @@ h3,
   function finishHole(holed) {
     const mult = holed ? scoreMultiplier(strokes, hole.par) : 0.2;
     const fee = Math.random() < stats.appearanceFee;
-    const coins = Math.max(1, Math.round(holeBaseCoins(hole.number) * mult * stats.coinMult)) * (fee ? stats.feeMult : 1);
+    const coins = Math.max(1, Math.round(holeBaseCoins(hole.number) * mult * stats.coinMult * (1 + Career.caddieBonus(save.career)))) * (fee ? stats.feeMult : 1);
     const label = holed ? scoreName(strokes, hole.par) : 'Picked up';
 
     save.holesPlayed++;
@@ -4336,6 +4427,7 @@ h3,
   }
 
   function startHole() {
+    if (reloadForUpdate()) return;   // between holes is the moment to pick up a newer build
     hole = Course.generate(save.hole, tournamentHole());
     theme = THEMES[hole.theme] || THEMES.parkland;
     ball = { x: hole.tee.x, z: hole.tee.z, vx: 0, vz: 0, travelled: 0, carry: 0, curve: 0, apex: 0 };
@@ -4853,14 +4945,15 @@ h3,
   // Paints a sprite (rows of letters, see sprites.js) with its top-left
   // corner at (left, top) in canvas pixels. k is how many canvas pixels each
   // sprite pixel covers; it need not be a whole number.
-  function stamp(rows, left, top, k) {
+  // inks, if given, says which letter to read some letters as (the caddie is the golfer in other clothes).
+  function stamp(rows, left, top, k, inks) {
     for (let r = 0; r < rows.length; r++) {
       const y = top + Math.round(r * k);
       const h = top + Math.round((r + 1) * k) - y;
       if (h <= 0) continue;
       const row = rows[r];
       for (let c = 0; c < row.length; c++) {
-        const ink = Sprites.INK[row[c]];
+        const ink = Sprites.INK[(inks && inks[row[c]]) || row[c]];
         const x = left + Math.round(c * k);
         const w = left + Math.round((c + 1) * k) - x;
         if (!ink || w <= 0) continue;
@@ -5263,6 +5356,42 @@ h3,
     ctx.restore();
   }
 
+  // Where the caddie stands or walks: a few paces behind the golfer and to one side, out of the line of the shot.
+  function caddieSpot() {
+    return {
+      x: walker.x - Math.cos(aimHeading) * 9 - Math.sin(aimHeading) * 7,
+      z: walker.z + Math.sin(aimHeading) * 9 - Math.cos(aimHeading) * 7
+    };
+  }
+
+  // The caddie, once hired: the golfer's walking figure in white overalls, with the bag over one shoulder.
+  function drawCaddie() {
+    const spot = caddieSpot();
+    const feet = project(spot.x, spot.z, 0);
+    if (!feet || (walker.moving && feet.d < WALK_IN)) return;
+    let k = feet.s * PX * Sprites.UNIT;
+    if (Math.abs(k - 1) < 0.2) k = 1;
+    const x = Math.round(feet.x * PX);
+    const y = Math.round(feet.y * PX);
+    const left = x - Math.round((Sprites.ANCHOR + 0.5) * k);
+    const top = y - Math.round(Sprites.HEIGHT * k);
+    const striding = walker.moving && Math.floor(performance.now() / 160) % 2;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    // the bag: a dark tube with a light band, slung behind the far shoulder
+    const part = (c, r, w, h, color) => {
+      ctx.fillStyle = color;
+      ctx.fillRect(left + Math.round(c * k), top + Math.round(r * k), Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k)));
+    };
+    part(12, 5, 4, 16, PAL.black);
+    part(13, 6, 2, 14, PAL.deep);
+    part(13, 11, 2, 2, PAL.gold);
+    part(13, 3, 1, 3, PAL.grey);
+    part(14, 4, 1, 2, PAL.grey);
+    stamp((striding ? Sprites.POSES.walkLeft : Sprites.POSES.walkRight).rows, left, top, k, Sprites.CADDIE_INK);
+    ctx.restore();
+  }
+
   // The golfer's intent, drawn on the ground: aim line, the flight through the
   // air (dotted), where the ball should come down (pale blue ring), where it
   // should finish (white ring) and how far off it is likely to be (gold ring).
@@ -5387,6 +5516,10 @@ h3,
     sprites.push({ d: toCamera(hole.cup.x, hole.cup.z).d, draw: drawFlag });
     stepWalker();
     sprites.push({ d: toCamera(walker.x, walker.z).d, draw: drawGolfer });
+    if (save.career.caddie) {
+      const spot = caddieSpot();
+      sprites.push({ d: toCamera(spot.x, spot.z).d, draw: drawCaddie });
+    }
     if (ballVisible) sprites.push({ d: toCamera(ball.x, ball.z).d, draw: drawBall });
     sprites.sort((a, b) => b.d - a.d);
     for (const sprite of sprites) sprite.draw();
@@ -5573,6 +5706,10 @@ h3,
     const cup = at(hole.cup.x, hole.cup.z);
     stamp(Sprites.ICONS.flag, cup.x, cup.y - Sprites.ICONS.flag.length + 1, 1);
     stepWalker();
+    if (save.career.caddie) {
+      const spot = caddieSpot();
+      icon(Sprites.ICONS.caddie, spot.x, spot.z);
+    }
     icon(Sprites.ICONS.golfer, walker.x, walker.z);
     if (phase !== 'holed' || strokes >= MAX_STROKES) {
       // the ball rises off its shadow as it flies
@@ -6056,15 +6193,17 @@ h3,
       el.contracts.appendChild(make('p', 'label', 'Active'));
       el.contracts.appendChild(dealRow(
         Career.contractText(active),
-        haggledText(active) + (Career.stakeName(active) ? Career.stakeName(active) + '. ' : '') + active.progress + ' of ' + active.target + ' done' +
+        haggledText(active) + (active.late ? 'Late, so it pays ' + Math.round(Career.LATE_PAY * 100) + '%. ' : Career.stakeName(active) ? Career.stakeName(active) + '. ' : '') + active.progress + ' of ' + active.target + ' done' +
           (Number.isFinite(active.total) ? ' at ' + toPar(active.total) : '') +
           (active.holesLeft === null ? ', no deadline' : ', ' + holesText(active.holesLeft) + ' left'),
         active.reward.toLocaleString() + ' coins',
         actionButton('Drop', true, () => Career.dropContract(career))));
     }
     el.contracts.appendChild(make('p', 'label', active ? 'On offer (finish or drop the active one first)' : 'On offer'));
-    if (stats.contractLevel > 1.004) {
-      el.contracts.appendChild(make('p', 'muted', 'New offers pay ' + Math.round((stats.contractLevel - 1) * 100) + '% more for the golfer\'s overall level (' +
+    el.contracts.appendChild(make('p', 'muted', 'A contract is never lost. Finished inside its deadline it pays in full; after that it carries on until it is done, for ' +
+      Math.round(Career.LATE_PAY * 100) + '% of the reward.'));
+    if (stats.offerLevel > 1.004) {
+      el.contracts.appendChild(make('p', 'muted', 'New offers pay ' + Math.round((stats.offerLevel - 1) * 100) + '% more for the golfer\'s overall level (' +
         Attributes.rank(save.attrs).level + '), and more with every level gained.'));
     }
     career.offers.forEach((offer, index) => {
@@ -6085,19 +6224,20 @@ h3,
     el.sponsor.textContent = '';
     el.sponsor.appendChild(make('p', 'label', stats.sponsorSlots > 1 ? 'Current (up to ' + stats.sponsorSlots + ')' : 'Current'));
     for (const held of [career.sponsor, career.sponsor2]) {
-      if (held) el.sponsor.appendChild(dealRow(held.name, haggledText(held) + holesText(held.holes) + ' left', Career.sponsorTerms(held)));
+      if (held) el.sponsor.appendChild(dealRow(held.name, haggledText(held) + Career.sponsorHoles(held) + ' left', Career.sponsorTerms(held)));
     }
     if (!career.sponsor && !career.sponsor2) el.sponsor.appendChild(make('p', 'muted', 'No sponsor yet.'));
     el.sponsor.appendChild(make('p', 'muted', 'Fame ' + Math.round(career.fame) + ' of ' + Career.FAME_MAX + ': new offers are ' +
-      Math.round((Career.fameMult(career) - 1) * 100) + '% better for it. Tournament finishes build it, and it fades without them.'));
+      Math.round((Career.fameMult(career) - 1) * 100) + '% better for it. Tournament finishes build it, and it fades without them.' +
+      (stats.offerLevel > 1.004 ? ' They also pay ' + Math.round((stats.offerLevel - 1) * 100) + '% more for the golfer\'s overall level.' : '')));
     const replaced = career[Career.sponsorSlot(career, stats.sponsorSlots)];
     el.sponsor.appendChild(make('p', 'label', 'Offer'));
     const offer = career.sponsorOffer;
     if (offer) {
       el.sponsor.appendChild(dealRow(
         offer.name,
-        haggledText(offer) + 'For ' + holesText(offer.holes) + ', ' + offer.signing.toLocaleString() + ' coins on signing. Expires in ' + holesText(offer.expiresIn) + '.',
-        Career.sponsorTerms(offer) + ' (about ' + Math.round(Career.sponsorValue(offer, career.form) / offer.holes).toLocaleString() + ' a hole on your form)'));
+        haggledText(offer) + 'For ' + Career.sponsorHoles(offer) + ', ' + offer.signing.toLocaleString() + ' coins on signing. Expires in ' + holesText(offer.expiresIn) + '.',
+        Career.sponsorTerms(offer) + ' (about ' + Math.round(Career.sponsorRate(offer, career.form)).toLocaleString() + ' a hole on your form)'));
       const buttons = make('div', 'deal-buttons');
       buttons.appendChild(actionButton(!replaced ? 'Sign' : stats.sponsorSlots > 1 ? 'Sign (replaces ' + replaced.name + ')' : 'Sign (replaces current)', true, () => {
         const signing = Career.acceptSponsor(career, stats.sponsorSlots);
@@ -6136,6 +6276,20 @@ h3,
         : 'Best there is'));
       el.gear.appendChild(button);
     }
+    // the caddie, bought the same way but with prices and levels of their own
+    const caddieCost = Career.caddieCost(career, stats.gearDiscount);
+    const upgrades = Career.CADDIE_COSTS.length - 1;
+    const caddie = actionButton('', caddieCost !== null && save.coins >= caddieCost, () => {
+      save.coins -= Career.buyCaddie(career, save.coins, stats.gearDiscount);
+      logMoment(career.caddie === 1 ? 'Hired a caddie' : 'Caddie improved to +' + Math.round(Career.caddieBonus(career) * 100) + '% hole coins', '#f8b800');
+    });
+    caddie.className = 'gear';
+    caddie.appendChild(make('span', 'name', 'Caddie'));
+    caddie.appendChild(make('span', 'detail', !career.caddie ? 'Not hired. A caddie walks the course with the golfer and, as they get better, adds to the coins from every hole'
+      : 'Hired: +' + Math.round(Career.caddieBonus(career) * 100) + '% coins from every hole (improved ' + (career.caddie - 1) + ' of ' + upgrades + ' times)'));
+    caddie.appendChild(make('span', 'pay', caddieCost === null ? 'As good as a caddie gets'
+      : (!career.caddie ? 'Hire' : 'Improve to +' + Math.round((Career.caddieBonus(career) + 0.02) * 100) + '%') + ': ' + caddieCost.toLocaleString() + ' coins'));
+    el.gear.appendChild(caddie);
     renderBag();
   }
 
@@ -6587,7 +6741,7 @@ h3,
       'Career ' + (save.legacy.retirements + 1) + ', ' + save.holesPlayed.toLocaleString() + ' holes played, ' + Math.round(save.coins).toLocaleString() + ' coins',
       'Tournament: ' + (t ? Career.TOURS[t.tier].name + (t.pending ? ', starting next hole' : t.playoff ? ', play-off' : ', through ' + t.scores.length) : 'none') +
         '; top tier open: ' + Career.TOURS[career.tour.unlocked].name + '; season ' + career.season.number + ', ' + career.season.played + ' played',
-      'Equipment tiers: ' + Career.GEAR.map(g => career.gear[g.id]).join(' ') + (career.bench.length ? '; left out: ' + career.bench.join(', ') : ''),
+      'Equipment tiers: ' + Career.GEAR.map(g => career.gear[g.id]).join(' ') + '; caddie ' + career.caddie + (career.bench.length ? '; left out: ' + career.bench.join(', ') : ''),
       'Switches: auto-accept ' + (career.auto ? 'on' : 'off') + ', auto-enter ' + (career.tour.auto ? 'on' : 'off') + ', auto-buy ' + (career.autoGear ? 'on' : 'off') +
         ', speed ' + speed + 'x, view ' + view + (reduceMotion ? ', reduce motion' : '') + (paused ? ', paused' : ''),
       'Window: ' + window.innerWidth + ' by ' + window.innerHeight
@@ -6818,6 +6972,57 @@ h3,
     savePrefs();
   });
 
+  // ---------- newer builds ----------
+
+  // Loads the page again for a newer build, if there is one and the player
+  // lets the game do that. Returns true if it is on its way. A build is only
+  // ever reloaded for once, in case the newer page is slow to arrive.
+  function reloadForUpdate(asked) {
+    if (!newerBuild || !onTheWeb || quiet) return false;
+    if (!asked && (prefs.autoUpdate === false || prefs.reloadedFor === newerBuild)) return false;
+    prefs.reloadedFor = newerBuild;
+    savePrefs();
+    writeSave();
+    // a new address, so that the browser fetches the page rather than showing the one it has kept
+    window.location.replace(window.location.pathname + '?build=' + encodeURIComponent(newerBuild));
+    return true;
+  }
+
+  function lookForUpdate() {
+    if (BUILD === 'dev' || !window.fetch || newerBuild) return;
+    // a web copy asks beside itself, which also works when it is being tried out somewhere else
+    const url = onTheWeb ? 'version.txt' : LATEST_URL;
+    window.fetch(url + '?at=' + Date.now(), { cache: 'no-store' })
+      .then(response => (response.ok ? response.text() : ''))
+      .then(text => {
+        const latest = text.trim();
+        if (!latest || latest === BUILD || latest.length > 60) return;
+        newerBuild = latest;
+        el.update.hidden = false;
+        if (onTheWeb) {
+          el.updateText.textContent = 'A newer build is ready (' + latest + ').' +
+            (prefs.autoUpdate === false || prefs.reloadedFor === latest ? '' : ' The game will load it when this hole is finished.');
+        } else {
+          el.updateText.textContent = 'A newer build is out (' + latest + '). This is a downloaded copy, so it cannot update itself: get the new one from ' + PLAY_URL;
+          el.updateNow.textContent = 'Open the page';
+        }
+      })
+      .catch(() => {
+        // offline, or the page is not there: nothing to do
+      });
+  }
+
+  el.updateNow.addEventListener('click', () => {
+    if (onTheWeb) reloadForUpdate(true);
+    else if (window.open) window.open(PLAY_URL, '_blank', 'noopener');
+  });
+  el.autoUpdate.addEventListener('change', () => {
+    prefs.autoUpdate = el.autoUpdate.checked;
+    savePrefs();
+  });
+  lookForUpdate();
+  setInterval(lookForUpdate, UPDATE_EVERY);
+
   el.hideMinimap.addEventListener('change', () => {
     hideMinimap = el.hideMinimap.checked;
     prefs.hideMinimap = hideMinimap;
@@ -6860,6 +7065,7 @@ h3,
   setMotion(prefs.reduceMotion);
   hideMinimap = prefs.hideMinimap === true;
   el.hideMinimap.checked = hideMinimap;
+  el.autoUpdate.checked = prefs.autoUpdate !== false;
 
   playTimeAway(() => {
     updateAttributes();
