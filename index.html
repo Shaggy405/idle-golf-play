@@ -842,6 +842,7 @@ h3,
       <section class="panel" data-panel="career" hidden>
         <label class="toggle"><input type="checkbox" id="auto-accept"> Auto-accept the best contract and sponsor offers</label>
         <label class="toggle">Auto-accept takes <select id="auto-risk"></select></label>
+        <p id="auto-note" class="muted"></p>
         <div class="career-grid">
           <div class="card">
             <h3>Contracts</h3>
@@ -2075,7 +2076,7 @@ h3,
   window.Career = {
     GEAR, TIERS, fresh, sanitize,
     gearBonus, clubBonus, gearEffect, nextTier, gearCost, buyGear, autoBuy, GEAR_FIRST,
-    AUTO_RISKS, fillOffers, contractText, stakeName, acceptContract, dropContract, haggle,
+    AUTO_RISKS, fillOffers, contractText, stakeName, acceptContract, dropContract, haggle, HAGGLE_AUTO,
     sponsorTerms, sponsorSlot, sponsorValue, fameMult, FAME_MAX, acceptSponsor, declineSponsor, autoPick,
     TOURS, TOUR_HOLES, TOUR_PRIZES, MAJOR, tournamentFee, enterTournament, tourHole, standings, rivalStyle, SEASON_LENGTH, SEASON_PRIZES, seasonTable, ordinal, underPressure, autoTier, placeText, theName,
     afterHole
@@ -2651,7 +2652,7 @@ h3,
   const MIGRATIONS = {};
   // Which build this is. tools/single-file.js writes the date and commit in
   // here when it builds the game for sharing; run from the project it stays 'dev'.
-  const BUILD = "2026-10-10 (2610c1d)";
+  const BUILD = "2026-10-10 (4e8fef3)";
   // Where "Send feedback" opens a new report, already filled in.
   const FEEDBACK_URL = 'https://github.com/Shaggy405/idle-golf-play/issues/new';
   const PREFS_KEY = 'idle-golf-prefs-v1';   // which tab is open and the play speed; not part of the save
@@ -2906,6 +2907,7 @@ h3,
     rank: document.getElementById('rank'),
     shots: document.getElementById('shots-list'),
     autoRisk: document.getElementById('auto-risk'),
+    autoNote: document.getElementById('auto-note'),
     awards: document.getElementById('awards-box'),
     reduceMotion: document.getElementById('reduce-motion'),
     hideMinimap: document.getElementById('hide-minimap'),
@@ -6041,6 +6043,12 @@ h3,
     const career = save.career;
     el.auto.checked = career.auto;
     el.autoRisk.value = career.autoRisk;
+    // whether auto-accept haggles, which it does without being seen to
+    const chance = Math.round(stats.haggle * 100);
+    el.autoNote.textContent = stats.haggle >= Career.HAGGLE_AUTO
+      ? 'Auto-accept haggles over every contract and sponsor it takes, as it takes them (a ' + chance + '% chance of talking each one up). The contract or deal says how it went.'
+      : 'Auto-accept does not haggle yet: at a ' + chance + '% chance it would lose more than it won. It starts at ' + Math.round(Career.HAGGLE_AUTO * 100) +
+        '%, which comes at Negotiation level ' + (save.attrs.negotiation.level + Math.ceil((Career.HAGGLE_AUTO - stats.haggle) / 0.02 - 1e-9)) + '.';
 
     el.contracts.textContent = '';
     const active = career.contract;
@@ -6048,7 +6056,7 @@ h3,
       el.contracts.appendChild(make('p', 'label', 'Active'));
       el.contracts.appendChild(dealRow(
         Career.contractText(active),
-        (Career.stakeName(active) ? Career.stakeName(active) + '. ' : '') + active.progress + ' of ' + active.target + ' done' +
+        haggledText(active) + (Career.stakeName(active) ? Career.stakeName(active) + '. ' : '') + active.progress + ' of ' + active.target + ' done' +
           (Number.isFinite(active.total) ? ' at ' + toPar(active.total) : '') +
           (active.holesLeft === null ? ', no deadline' : ', ' + holesText(active.holesLeft) + ' left'),
         active.reward.toLocaleString() + ' coins',
@@ -6077,7 +6085,7 @@ h3,
     el.sponsor.textContent = '';
     el.sponsor.appendChild(make('p', 'label', stats.sponsorSlots > 1 ? 'Current (up to ' + stats.sponsorSlots + ')' : 'Current'));
     for (const held of [career.sponsor, career.sponsor2]) {
-      if (held) el.sponsor.appendChild(dealRow(held.name, holesText(held.holes) + ' left', Career.sponsorTerms(held)));
+      if (held) el.sponsor.appendChild(dealRow(held.name, haggledText(held) + holesText(held.holes) + ' left', Career.sponsorTerms(held)));
     }
     if (!career.sponsor && !career.sponsor2) el.sponsor.appendChild(make('p', 'muted', 'No sponsor yet.'));
     el.sponsor.appendChild(make('p', 'muted', 'Fame ' + Math.round(career.fame) + ' of ' + Career.FAME_MAX + ': new offers are ' +
