@@ -1296,9 +1296,9 @@ h3,
   const TOURS = [
     { name: 'Local Open', fee: 3, mean: 9, sd: 3, course: 'Pine Hollow', theme: 'parkland', difficulty: 0.35 },
     { name: 'Regional Classic', fee: 5, mean: 8, sd: 3, course: 'Blackwood', theme: 'forest', difficulty: 0.55 },
-    { name: 'National Championship', fee: 8, mean: -1.6, sd: 2.5, course: 'Red Mesa', theme: 'desert', difficulty: 0.75 },
-    { name: 'The Major', fee: 12, mean: -1.2, sd: 2.5, course: 'St Brannoch', theme: 'links', difficulty: 0.9 },
-    { name: 'Legends Cup', fee: 18, mean: -3.5, sd: 2, course: 'Magnolia Hill', theme: 'parkland', difficulty: 1 }
+    { name: 'National Championship', fee: 8, mean: -2, sd: 2.5, course: 'Red Mesa', theme: 'desert', difficulty: 0.75 },
+    { name: 'The Major', fee: 12, mean: -4.2, sd: 2.5, course: 'St Brannoch', theme: 'links', difficulty: 0.9 },
+    { name: 'Legends Cup', fee: 18, mean: -6, sd: 2, course: 'Magnolia Hill', theme: 'parkland', difficulty: 1 }
   ];
   const COURSE_SEED = 900000;             // tournament courses are laid out from seeds far above any hole number
   const TOUR_CLOSING = 3;                 // holes at the end of a tournament played under pressure
@@ -2276,29 +2276,88 @@ h3,
     return best;
   }
 
-  // Hazards sit on or beside the fairway, where they matter.
-  function placeHazard(rng, type, hole, scale) {
-    const { tee, cup, line, halfWidth, hazards } = hole;
-    for (let attempt = 0; attempt < 40; attempt++) {
-      const i = 1 + Math.floor((0.18 + rng() * 0.8) * (line.length - 2));
-      const p = line[i];
-      const along = { x: line[i + 1].x - line[i - 1].x, z: line[i + 1].z - line[i - 1].z };
-      const len = Math.hypot(along.x, along.z);
-      const side = (rng() * 2 - 1) * (halfWidth + 25);
-      const h = {
-        type,
-        x: clamp(p.x + (along.z / len) * side, 35, WIDTH - 35),
-        z: clamp(p.z - (along.x / len) * side, tee.z + 90, LENGTH - 40),
-        rx: (28 + rng() * 34) * scale,
-        rz: (20 + rng() * 26) * scale
-      };
-      const reach = Math.max(h.rx, h.rz);
-      if (Math.hypot(h.x - tee.x, h.z - tee.z) < reach + 45) continue;
-      if (Math.hypot(h.x - cup.x, h.z - cup.z) < reach + 45) continue;
-      if (hazards.some(o => Math.hypot(h.x - o.x, h.z - o.z) < reach + Math.max(o.rx, o.rz))) continue;
-      return h;
+  // Hazards are ellipses lying square to the hole: { type, x, z, rx, rz }.
+  // They are laid out the way a course lays them out. Bunkers are small, and
+  // sit beside the fairway or around the green. Water is a lake down one side
+  // of the hole, made of several ellipses run together, or a stream across
+  // the hole short of the green.
+
+  // The point of the centre line at `share` (0..1) of the way along, and which way the hole runs there.
+  function lineAt(line, share) {
+    const i = clamp(Math.round(share * (line.length - 1)), 1, line.length - 2);
+    const along = { x: line[i + 1].x - line[i - 1].x, z: line[i + 1].z - line[i - 1].z };
+    const len = Math.hypot(along.x, along.z) || 1;
+    return { x: line[i].x, z: line[i].z, ax: along.x / len, az: along.z / len };
+  }
+
+  // Whether a hazard has room where it is: on the course, clear of the tee and the green, and not on top of another.
+  function hazardFits(hole, h, spare) {
+    const reach = Math.max(h.rx, h.rz);
+    if (h.x - h.rx < 12 || h.x + h.rx > WIDTH - 12 || h.z + h.rz > LENGTH - 12) return false;
+    if (Math.hypot(h.x - hole.tee.x, h.z - hole.tee.z) < reach + TEE_RADIUS + 30) return false;
+    if (Math.hypot(h.x - hole.cup.x, h.z - hole.cup.z) < GREEN_RADIUS + reach * 0.85) return false;
+    return !hole.hazards.some(o => !(spare && spare.includes(o)) && Math.abs(h.x - o.x) < (h.rx + o.rx) * 0.8 && Math.abs(h.z - o.z) < (h.rz + o.rz) * 0.8);
+  }
+
+  // A bunker beside the green: just off the putting surface, anywhere round it.
+  function greensideBunker(rng, hole, scale) {
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const h = { type: 'sand', rx: (11 + rng() * 8) * scale, rz: (9 + rng() * 6) * scale };
+      const angle = rng() * Math.PI * 2;
+      const out = GREEN_RADIUS + Math.max(h.rx, h.rz) + 2 + rng() * 8;
+      h.x = hole.cup.x + Math.sin(angle) * out;
+      h.z = hole.cup.z + Math.cos(angle) * out;
+      if (hazardFits(hole, h)) return h;
     }
     return null;
+  }
+
+  // A bunker at the edge of the fairway, where a drive or a lay-up might run into it.
+  function fairwayBunker(rng, hole, scale) {
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const p = lineAt(hole.line, 0.25 + rng() * 0.6);
+      const h = { type: 'sand', rx: (15 + rng() * 11) * scale, rz: (12 + rng() * 9) * scale };
+      const side = (rng() < 0.5 ? -1 : 1) * (hole.halfWidth + h.rx * (rng() * 0.9 - 0.7));   // most of them bite into the fairway
+      h.x = p.x + p.az * side;
+      h.z = p.z - p.ax * side;
+      if (hazardFits(hole, h)) return h;
+    }
+    return null;
+  }
+
+  // A stream or a waste of sand across the hole, short of the green, to be carried.
+  function crossing(rng, hole, type, scale) {
+    const length = lineLength(hole.line);
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const back = GREEN_RADIUS + 45 + rng() * 70;     // how far short of the cup it lies
+      if (back > length * 0.6) continue;
+      const p = lineAt(hole.line, 1 - back / length);
+      const h = { type, x: p.x, z: p.z, rx: hole.halfWidth + 22 + rng() * 20, rz: (15 + rng() * 11) * scale };
+      h.x = clamp(h.x, h.rx + 12, WIDTH - h.rx - 12);
+      if (hazardFits(hole, h)) return [h];
+    }
+    return [];
+  }
+
+  // A lake (or, in a desert, a waste of sand) down one side of the hole: a run of ellipses along the fairway's edge.
+  function lateral(rng, hole, type, scale) {
+    const side = rng() < 0.5 ? -1 : 1;
+    const pieces = 3 + Math.floor(rng() * 4);
+    const start = 0.2 + rng() * 0.5;
+    const stretch = lineLength(hole.line) / (hole.line.length - 1) * 2;   // two samples of the line apart
+    const made = [];
+    for (let j = 0; j < pieces; j++) {
+      const share = start + j * 2 / (hole.line.length - 1);
+      if (share > 0.97) break;
+      const p = lineAt(hole.line, share);
+      const h = { type, rx: (28 + rng() * 18) * scale, rz: Math.max(24, stretch * 0.75) };
+      const out = side * (hole.halfWidth + h.rx * 0.6);   // the lake's near shore cuts into the fairway's edge
+      h.x = p.x + p.az * out;
+      h.z = p.z - p.ax * out;
+      // its own neighbours are meant to run into it
+      if (hazardFits(hole, h, made)) made.push(h);
+    }
+    return made;
   }
 
   // A tree in play, near one edge of the fairway.
@@ -2407,15 +2466,22 @@ h3,
     const hole = { number: holeNumber, difficulty: diff, tee, cup, par, line, halfWidth, hazards: [], theme: kind };
     // short holes have room for fewer hazards and trees
     const room = par === 3 ? 0.5 : 1;
-    const sandCount = 1 + Math.floor(rng() * (3 + 2 * diff) * room);
-    const waterCount = number < 3 ? 0 : Math.floor(rng() * (3 + 2 * diff) * room);
-    const scale = 1 + 0.3 * diff;
-    for (let i = 0; i < waterCount; i++) {
-      const h = placeHazard(rng, kind === 'desert' ? 'sand' : 'water', hole, scale);
+    const scale = 1 + 0.25 * diff;
+    // water first, so the bunkers find their places round it: none on the first two holes
+    const wet = kind === 'desert' ? 'sand' : 'water';
+    const waters = number < 3 ? 0 : Math.floor(rng() * (2.4 + 1.6 * diff) * (par === 3 ? 0.7 : 1));
+    for (let i = 0; i < waters; i++) {
+      const across = rng() < (par === 3 ? 0.5 : 0.3);
+      hole.hazards.push(...(across ? crossing(rng, hole, wet, scale) : lateral(rng, hole, wet, scale)));
+    }
+    const greenside = 1 + Math.floor(rng() * (2 + 2 * diff));
+    for (let i = 0; i < greenside; i++) {
+      const h = greensideBunker(rng, hole, scale);
       if (h) hole.hazards.push(h);
     }
-    for (let i = 0; i < sandCount; i++) {
-      const h = placeHazard(rng, 'sand', hole, scale);
+    const beside = Math.floor(rng() * (2.5 + 3.5 * diff) * room);
+    for (let i = 0; i < beside; i++) {
+      const h = fairwayBunker(rng, hole, scale);
       if (h) hole.hazards.push(h);
     }
 
@@ -2736,7 +2802,7 @@ h3,
   const MIGRATIONS = {};
   // Which build this is. tools/single-file.js writes the date and commit in
   // here when it builds the game for sharing; run from the project it stays 'dev'.
-  const BUILD = "2026-10-10 (7464c31)";
+  const BUILD = "2026-10-10 (ef75f9d)";
   // Where the newest shared build says which build it is, and where it can be
   // played or downloaded. A shared copy looks there now and then to see
   // whether it has been overtaken; nothing is sent.
@@ -5055,10 +5121,10 @@ h3,
     groundPolygon([[tee.x - 14, tee.z - 10], [tee.x + 14, tee.z - 10], [tee.x + 14, tee.z + 10], [tee.x - 14, tee.z + 10]], PAL.fairway, PAL.far);
     groundPolygon(ellipsePoints(hole.cup.x, hole.cup.z, Course.GREEN_RADIUS, Course.GREEN_RADIUS), PAL.green, PAL.fairwayDark);
 
-    for (const h of hole.hazards) {
-      const water = h.type === 'water';
-      groundPolygon(ellipsePoints(h.x, h.z, h.rx, h.rz), water ? PAL.water : PAL.sand, water ? PAL.deep : PAL.sandEdge);
-    }
+    // Edges first and then the fills over them, so that a lake made of
+    // several ellipses run together is drawn as one piece of water.
+    for (const h of hole.hazards) groundPolygon(ellipsePoints(h.x, h.z, h.rx + 1.5, h.rz + 1.5), h.type === 'water' ? PAL.deep : PAL.sandEdge);
+    for (const h of hole.hazards) groundPolygon(ellipsePoints(h.x, h.z, h.rx, h.rz), h.type === 'water' ? PAL.water : PAL.sand);
 
     // an arrow on the green pointing downhill; longer means steeper
     const tilt = hole.slope.tilt;
