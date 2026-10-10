@@ -703,6 +703,14 @@ footer {
   margin-top: 16px;
 }
 
+/* which build of the game this is, at the start of the row of buttons */
+.build {
+  margin-right: auto;
+  align-self: center;
+  font-size: 16px;
+  color: #7c7c7c;
+}
+
 .reset {
   padding: 6px 10px;
   border: 1px solid #f83800;
@@ -883,6 +891,8 @@ h3,
       </section>
 
       <footer>
+        <span id="build" class="build"></span>
+        <button id="feedback" class="action" type="button">Send feedback</button>
         <button id="export-save" class="action" type="button">Export save</button>
         <button id="import-save" class="action" type="button">Import save</button>
         <button id="restore-save" class="action" type="button">Restore backup</button>
@@ -2635,6 +2645,11 @@ h3,
   // MIGRATIONS[n] takes the raw contents of a version n save and returns
   // them as version n + 1. Steps run in order until the save is current.
   const MIGRATIONS = {};
+  // Which build this is. tools/single-file.js writes the date and commit in
+  // here when it builds the game for sharing; run from the project it stays 'dev'.
+  const BUILD = "2026-10-10 (03583bf)";
+  // Where "Send feedback" opens a new report, already filled in.
+  const FEEDBACK_URL = 'https://github.com/Shaggy405/idle-golf-play/issues/new';
   const PREFS_KEY = 'idle-golf-prefs-v1';   // which tab is open and the play speed; not part of the save
   const WORLD_W = Course.WIDTH;
   const WORLD_L = Course.LENGTH;
@@ -2879,6 +2894,8 @@ h3,
     difficulty: document.getElementById('difficulty'),
     form: document.getElementById('form-box'),
     exportSave: document.getElementById('export-save'),
+    feedback: document.getElementById('feedback'),
+    build: document.getElementById('build'),
     restoreSave: document.getElementById('restore-save'),
     statsBox: document.getElementById('stats-box'),
     volume: document.getElementById('volume'),
@@ -6530,6 +6547,44 @@ h3,
   // ---------- export and import ----------
 
   // Hands the player the save as a file.
+  // ---------- feedback ----------
+
+  // What a report starts out saying: room for the player's own words, then
+  // where the game stood, so that nobody has to be asked. Nothing is sent
+  // from here; the player sees all of it on the page that opens and sends it themselves.
+  function feedbackBody() {
+    const career = save.career;
+    const t = career.tournament;
+    const rank = Attributes.rank(save.attrs);
+    const lines = [
+      'What happened:',
+      '',
+      '',
+      'What I expected:',
+      '',
+      '',
+      '---',
+      'Filled in by the game. Please leave it; it helps find the problem.',
+      'Build: ' + BUILD,
+      'Hole ' + (hole ? hole.number : save.hole) + (hole ? ', par ' + hole.par + ', ' + hole.theme + ', stroke ' + strokes : ''),
+      'Golfer: ' + rank.name + ', overall level ' + rank.level + ' (' + Attributes.SUBS.map(sub => save.attrs[sub.id].level).join(' ') + ')',
+      'Career ' + (save.legacy.retirements + 1) + ', ' + save.holesPlayed.toLocaleString() + ' holes played, ' + Math.round(save.coins).toLocaleString() + ' coins',
+      'Tournament: ' + (t ? Career.TOURS[t.tier].name + (t.pending ? ', starting next hole' : t.playoff ? ', play-off' : ', through ' + t.scores.length) : 'none') +
+        '; top tier open: ' + Career.TOURS[career.tour.unlocked].name + '; season ' + career.season.number + ', ' + career.season.played + ' played',
+      'Equipment tiers: ' + Career.GEAR.map(g => career.gear[g.id]).join(' ') + (career.bench.length ? '; left out: ' + career.bench.join(', ') : ''),
+      'Switches: auto-accept ' + (career.auto ? 'on' : 'off') + ', auto-enter ' + (career.tour.auto ? 'on' : 'off') + ', auto-buy ' + (career.autoGear ? 'on' : 'off') +
+        ', speed ' + speed + 'x, view ' + view + (reduceMotion ? ', reduce motion' : '') + (paused ? ', paused' : ''),
+      'Window: ' + window.innerWidth + ' by ' + window.innerHeight
+    ];
+    return lines.join('\n');
+  }
+
+  el.build.textContent = BUILD === 'dev' ? '' : 'Build ' + BUILD;
+  el.feedback.addEventListener('click', () => {
+    const url = FEEDBACK_URL + '?title=' + encodeURIComponent('Feedback: ') + '&body=' + encodeURIComponent(feedbackBody());
+    if (window.open) window.open(url, '_blank', 'noopener');
+  });
+
   el.exportSave.addEventListener('click', () => {
     writeSave();
     const link = document.createElement('a');
