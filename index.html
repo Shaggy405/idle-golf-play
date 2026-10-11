@@ -996,6 +996,16 @@ h3,
 // item as { text, issue } with the report's number, and the list links to it.
 const Changes = [
   {
+    id: 5,
+    date: '2026-10-11',
+    items: [
+      'Each piece of club equipment now does one thing more of its own, growing with its tier: the Driver has less distance error, the Fairway wood loses less distance from the rough, the Irons take less extra error from the rough, and the Wedge puts on more backspin. The Equipment tab says how much.',
+      'The golfer may bend a shot round water or the edge of the course, not only round a tree, and in a wind of 10 mph or more may punch the ball low under it. The plan line says which.',
+      'Three more things in the legacy shop: Loyal caddie (new careers begin with a caddie), Full diary (one more contract on offer) and Old friends (two sponsors from the first hole).',
+      'The swing has two more drawings in it: a takeaway and a follow-through.'
+    ]
+  },
+  {
     id: 4,
     date: '2026-10-11',
     items: [
@@ -1279,8 +1289,8 @@ const Changes = [
 (function () {
   'use strict';
 
-  const OFFER_SLOTS = 3;         // contracts on offer; a perk can raise it to MAX_OFFER_SLOTS
-  const MAX_OFFER_SLOTS = 4;
+  const OFFER_SLOTS = 3;         // contracts on offer; a perk and the legacy shop can each add one, up to MAX_OFFER_SLOTS
+  const MAX_OFFER_SLOTS = 5;
   const OFFER_MAX_AGE = 12;      // holes a contract offer stays on the board
 
   // Equipment comes in two kinds. Clubs improve the clubs they name (`clubs`
@@ -1288,10 +1298,10 @@ const Changes = [
   // and less aim error per bonus point. Everything else adds its bonus points
   // as levels to one sub-attribute (`sub`).
   const GEAR = [
-    { id: 'driver', name: 'Driver', clubs: ['Driver'] },
-    { id: 'wood', name: 'Fairway wood', clubs: ['3 wood', 'Hybrid'] },
-    { id: 'irons', name: 'Irons', clubs: ['4 iron', '7 iron', '9 iron'] },
-    { id: 'wedge', name: 'Wedge', clubs: ['Wedge', 'Sand wedge'] },
+    { id: 'driver', name: 'Driver', clubs: ['Driver'], extra: 'power' },
+    { id: 'wood', name: 'Fairway wood', clubs: ['3 wood', 'Hybrid'], extra: 'roughReach' },
+    { id: 'irons', name: 'Irons', clubs: ['4 iron', '7 iron', '9 iron'], extra: 'rough' },
+    { id: 'wedge', name: 'Wedge', clubs: ['Wedge', 'Sand wedge'], extra: 'spin' },
     { id: 'putter', name: 'Putter', clubs: ['Putter'] },
     { id: 'shoes', name: 'Shoes', sub: 'swingSpeed', boosts: 'Swing speed' },
     { id: 'glove', name: 'Glove', sub: 'grip', boosts: 'Grip positioning' },
@@ -1324,6 +1334,20 @@ const Changes = [
   ].concat(GEAR.map(g => ({ id: g.id, name: g.name })));
   const CLUB_DISTANCE = 0.01;    // extra distance per bonus point of a club's equipment
   const CLUB_AIM = 0.98;         // aim error multiplier per bonus point
+  // Each piece of club equipment does one thing more, of its own, per bonus
+  // point: the driver's distance error shrinks, the fairway woods lose less
+  // distance from the rough, the irons take less extra error from it, and
+  // the wedges put on more backspin.
+  const CLUB_EXTRA = {
+    power: { per: 0.98, text: share => share + '% less distance error' },
+    roughReach: { per: 0.9, text: share => share + '% less distance lost from rough' },
+    rough: { per: 0.92, text: share => share + '% less error from rough' },
+    spin: { per: 0.04, text: share => '+' + share + '% backspin' }
+  };
+  // how much of it a piece has at a number of bonus points, as a whole percentage
+  function extraShare(kind, points) {
+    return Math.round(100 * (kind === 'spin' ? CLUB_EXTRA.spin.per * points : 1 - Math.pow(CLUB_EXTRA[kind].per, points)));
+  }
   const PUTTER_ERROR = 0.97;     // putting error multiplier per bonus point of the putter
 
   const TIERS = [
@@ -1659,8 +1683,10 @@ const Changes = [
     return bonus;
   }
 
-  // What the clubs owned do, by club name: { reach, aim } multipliers for the
-  // bag's clubs and { error } for the putter.
+  // What the clubs owned do, by club name: { reach, aim, power, roughReach,
+  // rough, spin } multipliers for the bag's clubs and { error } for the
+  // putter. power is on distance error, roughReach on the distance a lie in
+  // rough takes off, rough on the error it adds, spin on the backspin available.
   function clubBonus(career) {
     const out = {};
     for (const g of GEAR) {
@@ -1669,7 +1695,8 @@ const Changes = [
       for (const club of g.clubs) {
         out[club] = club === 'Putter'
           ? { error: Math.pow(PUTTER_ERROR, points) }
-          : { reach: 1 + CLUB_DISTANCE * points, aim: Math.pow(CLUB_AIM, points) };
+          : { reach: 1 + CLUB_DISTANCE * points, aim: Math.pow(CLUB_AIM, points), power: 1, roughReach: 1, rough: 1, spin: 1 };
+        if (g.extra) out[club][g.extra] = g.extra === 'spin' ? 1 + CLUB_EXTRA.spin.per * points : Math.pow(CLUB_EXTRA[g.extra].per, points);
       }
     }
     return out;
@@ -1682,6 +1709,7 @@ const Changes = [
     if (g.clubs[0] === 'Putter') return Math.round((1 - Math.pow(PUTTER_ERROR, points)) * 100) + '% less putting error';
     return '+' + Math.round(CLUB_DISTANCE * points * 100) + '% distance, ' +
       Math.round((1 - Math.pow(CLUB_AIM, points)) * 100) + '% less aim error' +
+      (g.extra && points ? ', ' + CLUB_EXTRA[g.extra].text(extraShare(g.extra, points)) : '') +
       (g.clubs.length > 1 ? ' (' + g.clubs.join(', ') + ')' : '');
   }
 
@@ -2386,7 +2414,7 @@ const Changes = [
 
   window.Career = {
     GEAR, TIERS, fresh, sanitize,
-    gearBonus, clubBonus, gearEffect, nextTier, gearCost, buyGear, autoBuy, GEAR_FIRST, CADDIE_COSTS, caddieBonus, caddieCost, buyCaddie, STAFF, STAFF_COSTS, staffCost, buyStaff, staffNote, academyCost,
+    gearBonus, clubBonus, gearEffect, nextTier, gearCost, buyGear, autoBuy, GEAR_FIRST, CADDIE_COSTS, CADDIE_PAY, caddieBonus, caddieCost, buyCaddie, STAFF, STAFF_COSTS, staffCost, buyStaff, staffNote, academyCost,
     AUTO_RISKS, fillOffers, contractText, stakeName, acceptContract, dropContract, haggle, HAGGLE_AUTO,
     sponsorTerms, sponsorHoles, sponsorSlot, sponsorRate, LATE_PAY, fameMult, FAME_MAX, acceptSponsor, declineSponsor, autoPick,
     TOURS, TOUR_HOLES, TOUR_PRIZES, MAJOR, tournamentFee, enterTournament, tourHole, standings, rivalStyle, SEASON_LENGTH, SEASON_PRIZES, seasonTable, ordinal, underPressure, autoTier, placeText, theName,
@@ -2959,6 +2987,27 @@ const Changes = [
         '....krrrrrrkssk.'
       ].concat(LEGS_SIDE)
     },
+    // the takeaway: arms swung across the body, club low behind
+    takeaway: {
+      hands: [3, 13], head: [0, 20],
+      rows: [
+        '................',
+        '.......kkkk.....',
+        '......kwwwwk....',
+        '......kwwwwkkk..',
+        '......kwwwwwwk..',
+        '......knssskk...',
+        '......knsssk....',
+        '.......kssk.....',
+        '.....kkrrrkk....',
+        '....krrrrrrrk...',
+        '....krrrrrrrk...',
+        '...kkrrrrrrrk...',
+        '..ksskrrrrrrk...',
+        '..ksskrrrrrk....',
+        '...kkkrrrrrk....'
+      ].concat(LEGS_SIDE)
+    },
     // halfway back: hands by the hip, club pointing at the sky
     back: {
       hands: [3, 11], head: [1, 0],
@@ -3017,6 +3066,27 @@ const Changes = [
         '....krrrrrrrssk.',
         '....krrrrrrrssk.',
         '....krrrrrkkkk..',
+        '....krrrrrrk....',
+        '....krrrrrrk....',
+        '....krrrrrrk....'
+      ].concat(LEGS_SIDE)
+    },
+    // following through: arms up past the shoulder, club swinging over it
+    follow: {
+      hands: [13, 6], head: [8, -3],
+      rows: [
+        '................',
+        '......kkkk......',
+        '.....kwwwwk.....',
+        '.....kwwwwkkk...',
+        '.....kwwwwwwk...',
+        '.....knssskkkkk.',
+        '.....knsssk.kssk',
+        '......kssk..kssk',
+        '....kkrrrkkkrrk.',
+        '....krrrrrrrrk..',
+        '....krrrrrrrk...',
+        '....krrrrrrk....',
         '....krrrrrrk....',
         '....krrrrrrk....',
         '....krrrrrrk....'
@@ -3106,7 +3176,7 @@ const Changes = [
   const MIGRATIONS = {};
   // Which build this is. tools/single-file.js writes the date and commit in
   // here when it builds the game for sharing; run from the project it stays 'dev'.
-  const BUILD = "2026-10-11 (401897c)";
+  const BUILD = "2026-10-11 (5b1882c)";
   // Where the newest shared build says which build it is, and where it can be
   // played or downloaded. A shared copy looks there now and then to see
   // whether it has been overtaken; nothing is sent.
@@ -3164,6 +3234,8 @@ const Changes = [
   const PUNCH_REACH = 0.7;       // share of a club's distance
   const PUNCH_CARRY = 0.45;      // share of the club's usual time in the air
   const PUNCH_PEAK = 8;          // highest a punch flies
+  const BEND_BERTH = 12;         // how much further from water and the edges a shot bent round them has to stay
+  const PUNCH_WIND = 10;         // in a wind this strong a punch is weighed against a full shot even with no tree in the way
   const PUNCH_COST = 4;          // what the planner gives up, in units from the cup, to play a full shot instead
   // A shorter swing with more club: three-quarter or half. The ball flies
   // lower and runs further, so the wind has less to push on, and a short
@@ -3245,6 +3317,18 @@ const Changes = [
     {
       id: 'seed', name: 'Seed money', costs: [3, 5, 8],
       text: n => 'New careers begin with ' + SEED_COINS[n].toLocaleString() + ' coins'
+    },
+    {
+      id: 'caddie', name: 'Loyal caddie', costs: [4, 6, 8],
+      text: n => 'New careers begin with ' + (n === 0 ? 'no caddie' : n === 1 ? 'a caddie hired' : 'a caddie hired and improved ' + (n === 2 ? 'once' : 'twice') + ' (+' + Math.round(Career.CADDIE_PAY * (n - 1) * 100) + '% coins from every hole)')
+    },
+    {
+      id: 'diary', name: 'Full diary', costs: [6],
+      text: n => (n ? 'One more contract is on offer at a time' : 'The usual number of contracts are on offer')
+    },
+    {
+      id: 'friends', name: 'Old friends', costs: [12],
+      text: n => (n ? 'Two sponsors can be held at once from the first hole' : 'A second sponsor has to wait for Intelligence 40')
     },
     {
       id: 'nerve', name: "Old pro's nerve", costs: [10],
@@ -3447,7 +3531,7 @@ const Changes = [
   let save = loadSave();
   // a career begun before purchases were given at once is brought up to what its shop has bought
   // (all but Seed money, which cannot be told from coins since spent)
-  for (const id of ['headStart', 'bag', 'reputation']) applyShopNow(id);
+  for (const id of ['headStart', 'bag', 'reputation', 'caddie']) applyShopNow(id);
   let stats = buildStats();
   if (stats.sponsorSlots < 2) save.career.sponsor2 = null;   // a second deal needs the perk that allows it
   let hole = null;
@@ -3686,6 +3770,9 @@ const Changes = [
   function buildStats() {
     const s = Attributes.effects(save.attrs, Career.gearBonus(save.career));
     s.clubs = Career.clubBonus(save.career);   // what each club's own equipment adds
+    // from the legacy shop: a contract more on offer, and room for a second sponsor without the perk
+    if (save.legacy.shop.diary) s.offerSlots++;
+    if (save.legacy.shop.friends) s.sponsorSlots = Math.max(2, s.sponsorSlots);
     // legacy from earlier careers: more experience and more income, for good
     const legacy = legacyEffective(save.legacy.total);
     const income = 1 + LEGACY_COINS * legacy;
@@ -3889,6 +3976,12 @@ const Changes = [
     return carryFraction(spin, club) * (low ? PUNCH_CARRY : 1) * (0.6 + 0.4 * swing);
   }
 
+  // The most backspin the golfer can put on with a club: what Grip positioning
+  // gives, as much of it as the club takes, and what the club's equipment adds.
+  function clubSpin(club) {
+    return Math.min(1, stats.maxSpin * club.spin * stats.clubs[club.name].spin);
+  }
+
   // What a swing's size leaves of the backspin a club can put on, and of its aim error.
   function swingSpin(swing) {
     return swing * swing;
@@ -3926,7 +4019,7 @@ const Changes = [
   // and so does punching it low.
   function clubReach(club, lie, low) {
     return stats.maxDrive * club.reach * stats.clubs[club.name].reach *
-      (lie === 'sand' ? (club.sand ? 1 : stats.sandReach) : lie === 'rough' ? stats.roughReach : 1) * (low ? club.punch || PUNCH_REACH : 1);
+      (lie === 'sand' ? (club.sand ? 1 : stats.sandReach) : lie === 'rough' ? 1 - (1 - stats.roughReach) * stats.clubs[club.name].roughReach : 1) * (low ? club.punch || PUNCH_REACH : 1);
   }
 
   // The tournament being played, if there is one: one entered during this hole starts on the next.
@@ -3982,7 +4075,7 @@ const Changes = [
 
   // How much a lie in sand or rough multiplies a club's error by.
   function lieError(lie, club) {
-    if (lie !== 'sand') return stats.roughError;
+    if (lie !== 'sand') return 1 + (stats.roughError - 1) * stats.clubs[club.name].rough;
     return club.sand ? 1 : stats.sandError;
   }
 
@@ -4177,7 +4270,7 @@ const Changes = [
     const reach = Math.min(dist, longest);
     const instinctClub = pickClub(reach, lie);
     const instinct = {
-      heading: cupHeading, d: reach, spin: dist <= longest ? stats.maxSpin * instinctClub.spin : 0, curve: 0, avoided: false,
+      heading: cupHeading, d: reach, spin: dist <= longest ? clubSpin(instinctClub) : 0, curve: 0, avoided: false,
       club: instinctClub,
       tx: ball.x + Math.sin(cupHeading) * reach, tz: ball.z + Math.cos(cupHeading) * reach
     };
@@ -4220,7 +4313,7 @@ const Changes = [
       for (const swing of SWINGS) {
         const club = pickClub(full.d / swing, lie);
         if (clubReach(club, lie) * swing < full.d) continue;
-        const spin = Math.min(full.spin, stats.maxSpin * club.spin * swingSpin(swing));
+        const spin = Math.min(full.spin, clubSpin(club) * swingSpin(swing));
         const carry = full.d * shotCarry(spin, club, false, swing);
         const run = carry + rollOut(ball.x + Math.sin(full.heading) * carry, ball.z + Math.cos(full.heading) * carry, full.heading, full.d - carry);
         const fx = ball.x + Math.sin(full.heading) * run;
@@ -4235,6 +4328,26 @@ const Changes = [
         if (blown && windTrouble(full.tx, full.tz, full.d, spin, 0, margin, club, lie, false, swing)) continue;
         least = all;
         best = { heading: full.heading, d: full.d, spin, curve: 0, score, tx: full.tx, tz: full.tz, club, stop: run / full.d, swing };
+      }
+      // Or punched: lower than any swing, under nearly all of the wind, and
+      // most of its way along the ground, so what it runs over has to let it.
+      if (hole.wind.speed >= PUNCH_WIND && lie !== 'sand' && full.spin >= 0) {
+        const club = pickClub(full.d, lie, true);
+        if (clubReach(club, lie, true) >= full.d) {
+          const share = shotCarry(0, club, true);
+          const carry = full.d * share;
+          const run = carry + rollOut(ball.x + Math.sin(full.heading) * carry, ball.z + Math.cos(full.heading) * carry, full.heading, full.d - carry);
+          const fx = ball.x + Math.sin(full.heading) * run;
+          const fz = ball.z + Math.cos(full.heading) * run;
+          let score = Math.hypot(hole.cup.x - fx, hole.cup.z - fz) + PUNCH_COST;
+          if (Course.hazardAt(hole, fx, fz, 6) === 'sand') score += SAND_COST;
+          else if (Course.inRough(hole, fx, fz)) score += ROUGH_COST;
+          const drift = WIND_DRIFT * hole.wind.speed * windTime(full.d, share, shotPeak(carry, club, true)) * unread;
+          if (score + drift + full.d * baseError(club).aim < least && !shotTrouble(full.heading, full.d, 0, 0, margin, club, true) &&
+            !(blown && windTrouble(full.tx, full.tz, full.d, 0, 0, margin, club, lie, true))) {
+            best = { heading: full.heading, d: full.d, spin: 0, curve: 0, low: true, under: 'wind', score, tx: full.tx, tz: full.tz, club, stop: run / full.d };
+          }
+        }
       }
     }
     best.avoided = !!shotTrouble(instinct.heading, instinct.d, instinct.spin, 0, 0, instinct.club);
@@ -4260,7 +4373,7 @@ const Changes = [
         const clean = Math.hypot(hole.cup.x - tx, hole.cup.z - tz);
         const atPin = clean < 1;
 
-        for (const spin of [0, stats.maxSpin * club.spin]) {
+        for (const spin of [0, clubSpin(club)]) {
           // check up next to the pin, but let layups run
           const spinCost = atPin ? -5 * spin : 3 * spin;
           // a clean roll is the best the shot can do, so most are ruled out here
@@ -4280,9 +4393,8 @@ const Changes = [
             best = { heading: toward, d, spin, curve: 0, score, tx, tz, club, stop };
             continue;
           }
-          // only a tree in the way is worth punching the ball under or bending it around
-          if (trouble !== 'tree') continue;
-          if (lie !== 'sand') {
+          // a tree in the way may be punched under; anything in the way may be bent around
+          if (trouble === 'tree' && lie !== 'sand') {
             // a punch runs most of the way, so what it rolls over matters more
             const lowClub = pickClub(d, lie, true);
             const hit = Math.min(d, clubReach(lowClub, lie, true));
@@ -4310,8 +4422,10 @@ const Changes = [
             const shaped = score + short + 12 * Math.abs(curve);
             if (best && shaped >= best.score) continue;
             const bentClub = pickClub(hit, lie);
-            if (shotTrouble(heading, hit, spin, curve, margin, bentClub)) continue;
-            if (blown && windTrouble(tx - Math.sin(toward) * short, tz - Math.cos(toward) * short, hit, spin, curve, margin, bentClub, lie)) continue;
+            // a bend does not always come out as meant, so one played round water keeps further from it
+            const berth = trouble === 'tree' ? margin : margin + BEND_BERTH;
+            if (shotTrouble(heading, hit, spin, curve, berth, bentClub)) continue;
+            if (blown && windTrouble(tx - Math.sin(toward) * short, tz - Math.cos(toward) * short, hit, spin, curve, berth, bentClub, lie)) continue;
             // its roll is taken to be slowed as much as the straight shot's to the same spot
             best = {
               heading, d: hit, spin, curve, score: shaped, club: bentClub, stop,
@@ -4349,7 +4463,7 @@ const Changes = [
       const putter = stats.puttFactor * stats.clubs.Putter.error;
       return { aim: PUTT_AIM_FLOOR + stats.aimSigma * putter, power: PUTT_POWER_FLOOR + stats.powerSigma * putter };
     }
-    return { aim: stats.aimSigma * club.aim * stats.clubs[club.name].aim, power: stats.powerSigma };
+    return { aim: stats.aimSigma * club.aim * stats.clubs[club.name].aim, power: stats.powerSigma * stats.clubs[club.name].power };
   }
 
   // The error to expect on the planned shot, allowing for the lie, the spin
@@ -4422,6 +4536,7 @@ const Changes = [
       heading: aimHeading, d: dist + 3, spin: 0,
       avoided: false, misread: false, wind: false,
       low: false,                       // a punch, kept under the branches
+      under: '',                        // what a punch is kept under: 'branches' or 'wind'
       layUp: false,                     // played short or out sideways because nothing nearer the cup was safe
       swing: 1,                         // the size of the swing: 0.75 or 0.5 when more club is taken and swung shorter
       from: { x: ball.x, z: ball.z },
@@ -4456,6 +4571,7 @@ const Changes = [
       plan.avoided = p.avoided;
       plan.misread = !!p.misread;
       plan.layUp = !!p.layUp;
+      plan.under = p.under || (low ? 'branches' : '');
       plan.x = p.tx;
       plan.z = p.tz;
 
@@ -4524,7 +4640,7 @@ const Changes = [
       ', ' + Math.round(plan.d) + ' out' +
       (plan.spin > 0.05 ? ', ' + Math.round(plan.spin * 100) + '% backspin' : plan.spin < -0.05 ? ', ' + Math.round(-plan.spin * 100) + '% topspin for more run' : '') +
       (plan.curve ? ', bending it ' + (plan.curve > 0 ? 'right' : 'left') : '') +
-      (plan.low ? ', punched low under the branches' : '') +
+      (plan.low ? ', punched low under the ' + (plan.under || 'branches') : '') +
       (plan.swing < 1 ? ', kept down out of the wind' : '') +
       (plan.avoided ? ', routed around trouble' : '') +
       (plan.lie ? ', from ' + plan.lie : '') +
@@ -4574,7 +4690,7 @@ const Changes = [
         spin = dialled ? plan.spin : Math.min(0, Math.max(-stats.maxSpin, plan.spin + gaussian() * stats.spinSigma));
         d *= topRun(spin) / topRun(plan.spin);
       } else {
-        spin = dialled ? plan.spin : plan.low ? 0 : Math.max(0, Math.min(stats.maxSpin * club.spin * swingSpin(plan.swing), plan.spin + gaussian() * stats.spinSigma));
+        spin = dialled ? plan.spin : plan.low ? 0 : Math.max(0, Math.min(clubSpin(club) * swingSpin(plan.swing), plan.spin + gaussian() * stats.spinSigma));
         d *= 1 + 0.3 * (plan.spin - spin);
       }
       powerSigma *= 1 - 0.4 * spin;
@@ -5939,13 +6055,13 @@ const Changes = [
       const back = Math.min(BACKSWING, stats.shotDelay * 0.6);
       if (timer >= back) return P.address;
       t = 1 - timer / back;
-      keys = putting ? [[0, P.address], [1, PUTT_BACK]] : [[0, P.address], [0.5, P.back], [1, P.top]];
+      keys = putting ? [[0, P.address], [1, PUTT_BACK]] : [[0, P.address], [0.25, P.takeaway], [0.55, P.back], [1, P.top]];
     } else {
       t = sinceShot / THROUGH;
       if (t >= 1) return putting ? PUTT_THROUGH : P.finish;
       keys = putting
         ? [[0, PUTT_BACK], [0.5, P.address], [1, PUTT_THROUGH]]
-        : [[0, P.top], [0.25, P.back], [0.45, P.address], [0.7, P.through], [1, P.finish]];
+        : [[0, P.top], [0.2, P.back], [0.35, P.takeaway], [0.45, P.address], [0.62, P.through], [0.82, P.follow], [1, P.finish]];
     }
     let i = 0;
     while (i < keys.length - 2 && t > keys[i + 1][0]) i++;
@@ -7349,6 +7465,8 @@ const Changes = [
       save.career.tour.unlocked = Math.max(save.career.tour.unlocked, shop.reputation);
     } else if (id === 'seed') {
       save.coins += SEED_COINS[shop.seed] - SEED_COINS[shop.seed - 1];
+    } else if (id === 'caddie') {
+      save.career.caddie = Math.max(save.career.caddie, shop.caddie);
     }
   }
 
@@ -7363,6 +7481,7 @@ const Changes = [
     save.career = Career.fresh();
     for (const g of Career.GEAR) save.career.gear[g.id] = shop.bag;
     save.career.tour.unlocked = shop.reputation;
+    save.career.caddie = shop.caddie;
   }
 
   el.autoEnter.addEventListener('change', () => {
