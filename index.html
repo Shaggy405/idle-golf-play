@@ -987,6 +987,14 @@ h3,
 // (what they will see), and say where a change answers a report.
 const Changes = [
   {
+    id: 2,
+    date: '2026-10-11',
+    items: [
+      'The golfer no longer hits ball after ball into the same water (reported by a tester). In a strong wind it used to pick a spot it could not reach, come down short in the water, and play the same shot again until the hole was given up. It now works out where the wind will really put the ball before choosing a shot, and lays up short or out sideways when nothing else stays dry.',
+      'After a ball in the water the golfer gives trouble a wider berth for the rest of that hole, and does not misread it again.'
+    ]
+  },
+  {
     id: 1,
     date: '2026-10-11',
     items: [
@@ -3048,7 +3056,7 @@ const Changes = [
   const MIGRATIONS = {};
   // Which build this is. tools/single-file.js writes the date and commit in
   // here when it builds the game for sharing; run from the project it stays 'dev'.
-  const BUILD = "2026-10-11 (a364460)";
+  const BUILD = "2026-10-11 (05107d3)";
   // Where the newest shared build says which build it is, and where it can be
   // played or downloaded. A shared copy looks there now and then to see
   // whether it has been overtaken; nothing is sent.
@@ -3108,6 +3116,10 @@ const Changes = [
   const SWING_THIN = 0.9;        // a shorter swing is only played if it also stays dry at this share of its distance
   const SIGNATURE_PAY = 2;       // a birdie or better on a course's signature hole, in a tournament, pays the hole this many times over
   const SWING_COST = 2;          // what the planner gives up, in units from the cup, to play a full shot instead
+  const WARY = 12;               // how much wider a berth the planner gives water and trees for each ball already in the water on this hole
+  const WARY_MOST = 3;           // and the most balls it widens for
+  const LAY_UPS = [0.4, 0.3, 0.2, 0.6, 0.8];                             // when no usual shot is safe: shares of the distance the planner tries
+  const LAY_UP_LINES = [0, 0.4, -0.4, 0.8, -0.8, 1.2, -1.2, 1.6, -1.6];  // and how far off the line to the cup, radians
   const BREAK = 45;              // pull on a ball rolling across a green at full slope, units/s^2
   // The bag, longest first. reach is a share of the golfer's longest shot;
   // carry is added to the share of a shot spent in the air; apex scales its
@@ -4014,6 +4026,62 @@ const Changes = [
     return null;
   }
 
+  // The shot the wind makes of one meant to finish at (tx, tz): aimed off
+  // upwind by `allow` of what the wind `felt` will push it while it is in the
+  // air. Aiming off changes how far the shot has to go, which can call for
+  // another club and changes how long the wind has to work on it, so the sum
+  // is done twice: once for the shot as planned, once for the shot it became.
+  // Against a strong wind the longest club may not get there at all.
+  function aimOff(tx, tz, d, club, spin, curve, lie, low, swing, felt, allow) {
+    const longest = clubReach(pickClub(Infinity, lie, low), lie, low) * swing;
+    const aimed = { d, club, push: 0, x: tx, z: tz, heading: 0 };
+    let bent = null;
+    for (let pass = 0; pass < 2; pass++) {
+      const carryShare = shotCarry(spin, aimed.club, low, swing);
+      aimed.push = WIND_DRIFT * windTime(aimed.d, carryShare, shotPeak(aimed.d * carryShare, aimed.club, low, swing)) * allow;
+      aimed.x = tx - felt.x * aimed.push;
+      aimed.z = tz - felt.z * aimed.push;
+      bent = curveOffset(carryShare, curve);
+      aimed.d = Math.min(Math.hypot(aimed.x - ball.x, aimed.z - ball.z) / bent.ratio, longest);
+      aimed.club = pickClub(aimed.d / swing, lie, low);
+    }
+    aimed.heading = Math.atan2(aimed.x - ball.x, aimed.z - ball.z) - bent.angle;
+    return aimed;
+  }
+
+  // What shotTrouble asks, asked of the shot the wind makes of one meant to
+  // finish at (tx, tz): aimed off for as much of the wind as the golfer reads
+  // and blown by all of it, and again as a perfect read would play it. A shot
+  // the wind asks more of than the longest club has comes down short of where
+  // it was meant to, and its roll runs on the line it was aimed along.
+  function windTrouble(tx, tz, d, spin, curve, margin, club, lie, low, swing) {
+    const usual = stats.weatherEye && strokes === 0 ? 1 : stats.windRead;
+    for (const read of usual < 1 && stats.perfectRead > 0 ? [usual, 1] : [usual]) {
+      const aimed = aimOff(tx, tz, d, club, spin, curve, lie, low, swing || 1, hole.wind, read);
+      const share = shotCarry(spin, aimed.club, low, swing);
+      const carry = aimed.d * share;
+      const peak = shotPeak(carry, aimed.club, low, swing);
+      const drift = WIND_DRIFT * windTime(aimed.d, share, peak);
+      for (let t = 0.05; t <= 1.2001; t += 0.025) {
+        const s = aimed.d * t;
+        const p = pathPoint(aimed.heading, carry, curve, s);
+        const blown = drift * Math.min(1, s / carry);
+        const x = p.x + hole.wind.x * blown;
+        const z = p.z + hole.wind.z * blown;
+        if (s < carry) {
+          if (x < 0 || x > WORLD_W || z < 0 || z > WORLD_L) return 'ground';
+          const height = Math.sin(Math.PI * s / carry) * peak;
+          if (height < CROWN_BASE ? nearTree(x, z, TRUNK_RADIUS + 4, underTree)
+            : height < TREE_HEIGHT && nearTree(x, z, TREE_RADIUS + margin, underTree)) return 'tree';
+        } else {
+          if (!inBounds(x, z) || Course.hazardAt(hole, x, z, margin) === 'water') return 'ground';
+          if (nearTree(x, z, TRUNK_RADIUS + 4)) return 'tree';
+        }
+      }
+    }
+    return null;
+  }
+
   // How far a ball that lands at (x, z) rolling on heading h really runs,
   // when `roll` is what it would run over short grass: rough and sand under
   // it pull it up sooner.
@@ -4048,12 +4116,74 @@ const Changes = [
       tx: ball.x + Math.sin(cupHeading) * reach, tz: ball.z + Math.cos(cupHeading) * reach
     };
     const sharp = stats.eagleEye && strokes === 0;
-    if (!sharp && Math.random() < stats.misread) return Object.assign({ misread: true }, instinct);
+    // a ball in the water on this hole and the golfer looks properly
+    if (!sharp && !waterBalls && Math.random() < stats.misread) return Object.assign({ misread: true }, instinct);
 
+    // A ball already in the water on this hole and the golfer gives trouble a
+    // wider berth; in a wind the shot must stay dry as the wind will make it.
+    // If that leaves nothing, the usual berth, then a lay-up short or out
+    // sideways, and last of all the shot in still air.
+    const windy = hole.wind.speed >= 3;
+    const wary = stats.waterMargin + WARY * Math.min(WARY_MOST, waterBalls);
+    const tries = [[stats.waterMargin, windy, false], [stats.waterMargin, windy, true]];
+    if (waterBalls) tries.unshift([wary, windy, false]);
+    if (windy) tries.push([stats.waterMargin, false, false]);
+    let best = null;
+    let margin = 0;
+    let blown = false;
+    let layUp = false;
+    for ([margin, blown, layUp] of tries) {
+      best = safestShot(reach, longest, cupHeading, lie, margin, blown, layUp);
+      if (best) break;
+    }
+    if (!best) return instinct;
+    // In a wind, a straight shot is weighed again with more club and a shorter
+    // swing: what it stands to miss by (the wind the golfer does not read,
+    // and their aim) against where it would finish.
+    if (windy && !best.low && !best.curve) {
+      const unread = (stats.weatherEye && strokes === 0 ? 0 : 1 - stats.windRead) * (hole.wind.gusty ? 1 + GUST : 1);
+      const atPin = Math.hypot(hole.cup.x - best.tx, hole.cup.z - best.tz) < 1;
+      const miss = (club, spin, swing) => {
+        const share = shotCarry(spin, club, false, swing);
+        const drift = WIND_DRIFT * hole.wind.speed * windTime(best.d, share, shotPeak(best.d * share, club, false, swing)) * unread;
+        return drift + best.d * baseError(club).aim * swingAim(swing);
+      };
+      let least = best.score + miss(best.club, best.spin, 1);
+      const full = best;
+      for (const swing of SWINGS) {
+        const club = pickClub(full.d / swing, lie);
+        if (clubReach(club, lie) * swing < full.d) continue;
+        const spin = Math.min(full.spin, stats.maxSpin * club.spin * swingSpin(swing));
+        const carry = full.d * shotCarry(spin, club, false, swing);
+        const run = carry + rollOut(ball.x + Math.sin(full.heading) * carry, ball.z + Math.cos(full.heading) * carry, full.heading, full.d - carry);
+        const fx = ball.x + Math.sin(full.heading) * run;
+        const fz = ball.z + Math.cos(full.heading) * run;
+        let score = Math.hypot(hole.cup.x - fx, hole.cup.z - fz) + (atPin ? -5 * spin : 3 * spin) + SWING_COST;
+        if (Course.hazardAt(hole, fx, fz, 6) === 'sand') score += SAND_COST;
+        else if (Course.inRough(hole, fx, fz)) score += ROUGH_COST;
+        const all = score + miss(club, spin, swing);
+        if (all >= least || shotTrouble(full.heading, full.d, spin, 0, margin, club, false, swing)) continue;
+        // it comes down sooner and runs further, so one caught a little thin must stay dry as well
+        if (shotTrouble(full.heading, full.d * SWING_THIN, spin, 0, margin, club, false, swing) === 'ground') continue;
+        if (blown && windTrouble(full.tx, full.tz, full.d, spin, 0, margin, club, lie, false, swing)) continue;
+        least = all;
+        best = { heading: full.heading, d: full.d, spin, curve: 0, score, tx: full.tx, tz: full.tz, club, stop: run / full.d, swing };
+      }
+    }
+    best.avoided = !!shotTrouble(instinct.heading, instinct.d, instinct.spin, 0, 0, instinct.club);
+    return best;
+  }
+
+  // The planner's search: of the spots the golfer could play to, the one that
+  // finishes nearest the cup while keeping `margin` clear of water and trees,
+  // or null if there is none. With `blown` the shot has to stay clear as the
+  // wind will make it as well as in still air. With `layUp` it looks shorter
+  // and further off the line to the cup than a golfer would care to play.
+  function safestShot(reach, longest, cupHeading, lie, margin, blown, layUp) {
     const bends = [stats.maxCurve / 2, -stats.maxCurve / 2, stats.maxCurve, -stats.maxCurve];
     let best = null;
-    for (const df of [1, 0.9, 0.8, 0.7, 0.6, 0.5]) {
-      for (const off of [0, 0.12, -0.12, 0.25, -0.25, 0.4, -0.4, 0.6, -0.6]) {
+    for (const df of layUp ? LAY_UPS : [1, 0.9, 0.8, 0.7, 0.6, 0.5]) {
+      for (const off of layUp ? LAY_UP_LINES : [0, 0.12, -0.12, 0.25, -0.25, 0.4, -0.4, 0.6, -0.6]) {
         const toward = cupHeading + off;
         const d = reach * df;
         const club = pickClub(d, lie);
@@ -4077,7 +4207,7 @@ const Changes = [
           else if (Course.inRough(hole, fx, fz)) score += ROUGH_COST;
           if (best && score >= best.score) continue;
           const stop = run / d;
-          const trouble = shotTrouble(toward, d, spin, 0, stats.waterMargin, club);
+          const trouble = shotTrouble(toward, d, spin, 0, margin, club) || (blown && windTrouble(tx, tz, d, spin, 0, margin, club, lie) ? 'wind' : null);
           if (!trouble) {
             best = { heading: toward, d, spin, curve: 0, score, tx, tz, club, stop };
             continue;
@@ -4095,7 +4225,8 @@ const Changes = [
             let lowScore = Math.hypot(hole.cup.x - lx, hole.cup.z - lz) + PUNCH_COST;
             if (Course.hazardAt(hole, lx, lz, 6) === 'sand') lowScore += SAND_COST;
             else if (Course.inRough(hole, lx, lz)) lowScore += ROUGH_COST;
-            if ((!best || lowScore < best.score) && !shotTrouble(toward, hit, 0, 0, stats.waterMargin, lowClub, true)) {
+            if ((!best || lowScore < best.score) && !shotTrouble(toward, hit, 0, 0, margin, lowClub, true) &&
+              !(blown && windTrouble(ball.x + Math.sin(toward) * hit, ball.z + Math.cos(toward) * hit, hit, 0, 0, margin, lowClub, lie, true))) {
               best = {
                 heading: toward, d: hit, spin: 0, curve: 0, low: true, score: lowScore, club: lowClub, stop: lowRun / hit,
                 tx: ball.x + Math.sin(toward) * hit, tz: ball.z + Math.cos(toward) * hit
@@ -4111,7 +4242,8 @@ const Changes = [
             const shaped = score + short + 12 * Math.abs(curve);
             if (best && shaped >= best.score) continue;
             const bentClub = pickClub(hit, lie);
-            if (shotTrouble(heading, hit, spin, curve, stats.waterMargin, bentClub)) continue;
+            if (shotTrouble(heading, hit, spin, curve, margin, bentClub)) continue;
+            if (blown && windTrouble(tx - Math.sin(toward) * short, tz - Math.cos(toward) * short, hit, spin, curve, margin, bentClub, lie)) continue;
             // its roll is taken to be slowed as much as the straight shot's to the same spot
             best = {
               heading, d: hit, spin, curve, score: shaped, club: bentClub, stop,
@@ -4121,40 +4253,6 @@ const Changes = [
         }
       }
     }
-    if (!best) return instinct;
-    // In a wind, a straight shot is weighed again with more club and a shorter
-    // swing: what it stands to miss by (the wind the golfer does not read,
-    // and their aim) against where it would finish.
-    if (hole.wind.speed >= 3 && !best.low && !best.curve) {
-      const unread = (stats.weatherEye && strokes === 0 ? 0 : 1 - stats.windRead) * (hole.wind.gusty ? 1 + GUST : 1);
-      const atPin = Math.hypot(hole.cup.x - best.tx, hole.cup.z - best.tz) < 1;
-      const miss = (club, spin, swing) => {
-        const share = shotCarry(spin, club, false, swing);
-        const blown = WIND_DRIFT * hole.wind.speed * windTime(best.d, share, shotPeak(best.d * share, club, false, swing)) * unread;
-        return blown + best.d * baseError(club).aim * swingAim(swing);
-      };
-      let least = best.score + miss(best.club, best.spin, 1);
-      const full = best;
-      for (const swing of SWINGS) {
-        const club = pickClub(full.d / swing, lie);
-        if (clubReach(club, lie) * swing < full.d) continue;
-        const spin = Math.min(full.spin, stats.maxSpin * club.spin * swingSpin(swing));
-        const carry = full.d * shotCarry(spin, club, false, swing);
-        const run = carry + rollOut(ball.x + Math.sin(full.heading) * carry, ball.z + Math.cos(full.heading) * carry, full.heading, full.d - carry);
-        const fx = ball.x + Math.sin(full.heading) * run;
-        const fz = ball.z + Math.cos(full.heading) * run;
-        let score = Math.hypot(hole.cup.x - fx, hole.cup.z - fz) + (atPin ? -5 * spin : 3 * spin) + SWING_COST;
-        if (Course.hazardAt(hole, fx, fz, 6) === 'sand') score += SAND_COST;
-        else if (Course.inRough(hole, fx, fz)) score += ROUGH_COST;
-        const all = score + miss(club, spin, swing);
-        if (all >= least || shotTrouble(full.heading, full.d, spin, 0, stats.waterMargin, club, false, swing)) continue;
-        // it comes down sooner and runs further, so one caught a little thin must stay dry as well
-        if (shotTrouble(full.heading, full.d * SWING_THIN, spin, 0, stats.waterMargin, club, false, swing) === 'ground') continue;
-        least = all;
-        best = { heading: full.heading, d: full.d, spin, curve: 0, score, tx: full.tx, tz: full.tz, club, stop: run / full.d, swing };
-      }
-    }
-    best.avoided = !!shotTrouble(instinct.heading, instinct.d, instinct.spin, 0, 0, instinct.club);
     return best;
   }
 
@@ -4287,26 +4385,11 @@ const Changes = [
       // shot, and the golfer senses the same share of that.
       plan.shift = hole.wind.shifty ? gaussian() * SHIFT : 0;
       const felt = turned(hole.wind, plan.shift * plan.read);
-      // Aiming off changes how far the shot has to go, which can call for
-      // another club and changes how long the wind has to work on it, so the
-      // sum is done twice: once for the shot as planned, once for the shot it became.
-      const longest = clubReach(pickClub(Infinity, lie, low), lie, low) * swing;
-      let push = 0;
-      let ax = plan.x;
-      let az = plan.z;
-      let bent = null;
-      plan.d = p.d;
-      plan.club = p.club;
-      for (let pass = 0; pass < 2; pass++) {
-        carryShare = shotCarry(p.spin, plan.club, low, swing);
-        push = WIND_DRIFT * windTime(plan.d, carryShare, shotPeak(plan.d * carryShare, plan.club, low, swing)) * plan.read * sensed;
-        ax = plan.x - felt.x * push;
-        az = plan.z - felt.z * push;
-        bent = curveOffset(carryShare, p.curve);
-        plan.d = Math.min(Math.hypot(ax - ball.x, az - ball.z) / bent.ratio, longest);
-        plan.club = pickClub(plan.d / swing, lie, low);
-      }
-      plan.heading = Math.atan2(ax - ball.x, az - ball.z) - bent.angle;
+      const aimed = aimOff(plan.x, plan.z, p.d, p.club, p.spin, p.curve, lie, low, swing, felt, plan.read * sensed);
+      const push = aimed.push;
+      plan.d = aimed.d;
+      plan.club = aimed.club;
+      plan.heading = aimed.heading;
       carryShare = shotCarry(p.spin, plan.club, low, swing);
 
       // the expected track over the ground, for drawing
