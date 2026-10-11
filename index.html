@@ -772,7 +772,6 @@ h3,
         <div class="stat"><span class="label">Strokes</span><span id="strokes">0</span></div>
         <div class="stat"><span class="label">Momentum</span><span id="momentum">0</span></div>
         <div class="stat"><span class="label">Stamina</span><span id="stamina">100%</span></div>
-        <div class="stat"><span class="label">Played</span><span id="played">0</span></div>
         <div class="stat"><span class="label">Aces</span><span id="aces">0</span></div>
       </header>
 
@@ -2928,7 +2927,7 @@ h3,
   const MIGRATIONS = {};
   // Which build this is. tools/single-file.js writes the date and commit in
   // here when it builds the game for sharing; run from the project it stays 'dev'.
-  const BUILD = "2026-10-11 (51365d0)";
+  const BUILD = "2026-10-11 (47dda2a)";
   // Where the newest shared build says which build it is, and where it can be
   // played or downloaded. A shared copy looks there now and then to see
   // whether it has been overtaken; nothing is sent.
@@ -3204,7 +3203,6 @@ h3,
     importSave: document.getElementById('import-save'),
     importFile: document.getElementById('import-file'),
     strokes: document.getElementById('strokes'),
-    played: document.getElementById('played'),
     aces: document.getElementById('aces'),
     momentum: document.getElementById('momentum'),
     stamina: document.getElementById('stamina'),
@@ -6631,8 +6629,8 @@ h3,
     el.par.textContent = hole ? hole.par : '-';
     el.difficulty.textContent = hole ? Math.round(hole.difficulty * 100) + '%' : '-';
     el.strokes.textContent = strokes;
-    el.played.textContent = save.holesPlayed.toLocaleString();
-    el.aces.textContent = save.holesInOne.toLocaleString();
+    // this career's aces; every career's are on the Stats tab, with the holes played
+    el.aces.textContent = save.careerRecords.holesInOne.toLocaleString();
     el.momentum.textContent = (momentum > 0 ? '+' : '') + momentum;
     el.momentum.className = momentum > 0 ? 'hot' : momentum < 0 ? 'cold' : '';
     const tired = fatigue();
