@@ -987,6 +987,14 @@ h3,
 // (what they will see), and say where a change answers a report.
 const Changes = [
   {
+    id: 3,
+    date: '2026-10-11',
+    items: [
+      'When the golfer plays short or out sideways because nothing nearer the hole is safe, the plan line under the course now says so: "laying up out of the wind", or "laying up short of trouble" in a calm. It is rare, about one hole in two or three hundred.',
+      "On the map, a wind that both gusts and shifts no longer writes SHIFTS on top of the hole's number."
+    ]
+  },
+  {
     id: 2,
     date: '2026-10-11',
     items: [
@@ -3056,7 +3064,7 @@ const Changes = [
   const MIGRATIONS = {};
   // Which build this is. tools/single-file.js writes the date and commit in
   // here when it builds the game for sharing; run from the project it stays 'dev'.
-  const BUILD = "2026-10-11 (05107d3)";
+  const BUILD = "2026-10-11 (c33bc86)";
   // Where the newest shared build says which build it is, and where it can be
   // played or downloaded. A shared copy looks there now and then to see
   // whether it has been overtaken; nothing is sent.
@@ -4137,6 +4145,7 @@ const Changes = [
       if (best) break;
     }
     if (!best) return instinct;
+    const laidUp = layUp;
     // In a wind, a straight shot is weighed again with more club and a shorter
     // swing: what it stands to miss by (the wind the golfer does not read,
     // and their aim) against where it would finish.
@@ -4171,6 +4180,7 @@ const Changes = [
       }
     }
     best.avoided = !!shotTrouble(instinct.heading, instinct.d, instinct.spin, 0, 0, instinct.club);
+    best.layUp = laidUp;
     return best;
   }
 
@@ -4336,6 +4346,7 @@ const Changes = [
       heading: aimHeading, d: dist + 3, spin: 0,
       avoided: false, misread: false, wind: false,
       low: false,                       // a punch, kept under the branches
+      layUp: false,                     // played short or out sideways because nothing nearer the cup was safe
       swing: 1,                         // the size of the swing: 0.75 or 0.5 when more club is taken and swung shorter
       from: { x: ball.x, z: ball.z },
       x: hole.cup.x, z: hole.cup.z,     // where the ball is meant to finish
@@ -4368,6 +4379,7 @@ const Changes = [
       plan.curve = p.curve;
       plan.avoided = p.avoided;
       plan.misread = !!p.misread;
+      plan.layUp = !!p.layUp;
       plan.x = p.tx;
       plan.z = p.tz;
 
@@ -4432,7 +4444,7 @@ const Changes = [
     }
     const forPin = Math.hypot(hole.cup.x - plan.x, hole.cup.z - plan.z) < 1;
     return 'Next: ' + (plan.swing < 1 ? swingName(plan.swing) + ' ' : '') + plan.club.name.toLowerCase() + ', ' +
-      (plan.misread ? 'misread the hole, firing straight at the pin' : forPin ? 'going for the pin' : 'playing up the hole') +
+      (plan.misread ? 'misread the hole, firing straight at the pin' : forPin ? 'going for the pin' : plan.layUp ? 'laying up' + (plan.wind ? ' out of the wind' : ' short of trouble') : 'playing up the hole') +
       ', ' + Math.round(plan.d) + ' out' +
       (plan.spin > 0.05 ? ', ' + Math.round(plan.spin * 100) + '% backspin' : '') +
       (plan.curve ? ', bending it ' + (plan.curve > 0 ? 'right' : 'left') : '') +
@@ -6217,7 +6229,9 @@ const Changes = [
     // the panel down the left: the hole, and the shot being played
     ctx.fillStyle = PAL.white;
     ctx.fillRect(PANEL_W, 0, 1, PIXEL_H);
-    const line = (text, y, color) => pixelText(text, 3, y, color || PAL.white, 1, 'left');
+    // a wind that gusts and shifts takes a third line under the dial, so the panel starts lower
+    const drop = hole.wind.gusty && hole.wind.shifty ? 7 : 0;
+    const line = (text, y, color) => pixelText(text, 3, y + drop, color || PAL.white, 1, 'left');
     // in a tournament the hole goes by its number on the course, 1 to 9
     line('HOLE ' + (hole.course ? hole.course.index + 1 : hole.number), 38, PAL.gold);
     line('PAR ' + hole.par, 46);
