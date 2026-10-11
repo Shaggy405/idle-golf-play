@@ -1186,6 +1186,16 @@ h3,
   // costs, then each improvement in turn.
   const CADDIE_COSTS = [1000, 5000, 25000, 100000, 400000, 1500000];
   const CADDIE_PAY = 0.02;
+  // Staff are for late in a career, when the equipment is bought: each is
+  // hired and then improved, and adds a level to one Intelligence
+  // sub-attribute every time. STAFF_COSTS is what hiring costs, then each
+  // improvement in turn, the same for all three.
+  const STAFF = [
+    { id: 'agent', name: 'Agent', sub: 'negotiation', boosts: 'Negotiation' },
+    { id: 'coach', name: 'Coach', sub: 'study', boosts: 'Study' },
+    { id: 'mind', name: 'Mind coach', sub: 'composure', boosts: 'Composure' }
+  ];
+  const STAFF_COSTS = [3000000, 6000000, 12000000, 24000000, 48000000];
   // What auto-buy can be told to get first: the cheapest upgrade going, the
   // clubs, everything that is not a club, or any one piece.
   const GEAR_FIRST = [
@@ -1379,8 +1389,10 @@ h3,
   function fresh() {
     const gear = {};
     for (const g of GEAR) gear[g.id] = 0;
+    const staff = {};
+    for (const hire of STAFF) staff[hire.id] = 0;
     return {
-      gear, contract: null, offers: [], sponsor: null, sponsor2: null, sponsorOffer: null, nextSponsorIn: 4, auto: false, autoRisk: 'long', autoGear: false, autoGearFirst: 'cheapest',
+      gear, staff, contract: null, offers: [], sponsor: null, sponsor2: null, sponsorOffer: null, nextSponsorIn: 4, auto: false, autoRisk: 'long', autoGear: false, autoGearFirst: 'cheapest',
       tournament: null, tour: freshTour(), form: freshForm(), season: freshSeason(1, 0),
       caddie: 0,                 // 0 for no caddie, 1 once hired, then one more for each improvement
       bench: [],                 // names of clubs the player has left out of the bag
@@ -1481,6 +1493,10 @@ h3,
     }
     if (Number.isInteger(raw.academy) && raw.academy >= 0) c.academy = Math.min(40, raw.academy);
     if (Number.isInteger(raw.caddie) && raw.caddie >= 0) c.caddie = Math.min(CADDIE_COSTS.length, raw.caddie);
+    for (const hire of STAFF) {
+      const level = raw.staff && raw.staff[hire.id];
+      if (Number.isInteger(level) && level >= 0) c.staff[hire.id] = Math.min(STAFF_COSTS.length, level);
+    }
     if (Number.isFinite(raw.fame) && raw.fame >= 0) c.fame = Math.min(FAME_MAX, raw.fame);
     if (Array.isArray(raw.bench)) c.bench = raw.bench.filter(name => typeof name === 'string' && name.length <= 20).slice(0, 12);
     const season = raw.season;
@@ -1499,12 +1515,13 @@ h3,
 
   // ---------- equipment ----------
 
-  // Bonus levels per sub-attribute from the equipment owned.
+  // Bonus levels per sub-attribute from the equipment owned and the staff hired.
   function gearBonus(career) {
     const bonus = {};
     for (const g of GEAR) {
       if (g.sub) bonus[g.sub] = TIERS[career.gear[g.id]].bonus;
     }
+    for (const hire of STAFF) bonus[hire.sub] = career.staff[hire.id];
     return bonus;
   }
 
@@ -1573,6 +1590,28 @@ h3,
     return cost;
   }
 
+  // ---------- staff ----------
+
+  // What hiring one of the staff or their next improvement costs after a discount (0..1), or null when there is nothing more to buy.
+  function staffCost(career, id, discount) {
+    const cost = STAFF_COSTS[career.staff[id]];
+    return cost === undefined ? null : Math.round(cost * (1 - (discount || 0)));
+  }
+
+  // Hires one of the staff or pays for their next improvement. Returns the coins spent, or 0 if it can't be bought.
+  function buyStaff(career, id, coins, discount) {
+    const cost = staffCost(career, id, discount);
+    if (cost === null || coins < cost) return 0;
+    career.staff[id]++;
+    return cost;
+  }
+
+  // What was just bought from one of the staff, for the log.
+  function staffNote(career, hire) {
+    return (career.staff[hire.id] === 1 ? 'Hired ' + (/^[AEIOU]/.test(hire.name) ? 'an ' : 'a ') + hire.name.toLowerCase() : hire.name + ' improved') +
+      ': +' + career.staff[hire.id] + ' ' + hire.boosts;
+  }
+
   // Whether auto-buy has been told to get this piece of equipment first.
   function putFirst(career, g) {
     const first = career.autoGearFirst;
@@ -1584,7 +1623,8 @@ h3,
   // upgrade there is, unless some equipment has been put first: those pieces
   // are kept a tier ahead of the rest, and the coins are saved for them when
   // it is their turn. The caddie is bought in the same way whenever they
-  // cost no more than the equipment next in line.
+  // cost no more than the equipment next in line, and so are the staff, the
+  // cheapest of them first.
   // Returns the coins spent and a note for each purchase.
   function autoBuy(career, coins, discount) {
     const out = { spent: 0, notes: [] };
@@ -1601,6 +1641,17 @@ h3,
         if (caddie > coins - out.spent) return out;
         out.spent += buyCaddie(career, coins - out.spent, discount);
         out.notes.push((career.caddie === 1 ? 'Hired a caddie' : 'Caddie improved to +' + Math.round(caddieBonus(career) * 100) + '%') + ' -' + caddie.toLocaleString());
+        continue;
+      }
+      let hire = null;
+      for (const one of STAFF) {
+        const cost = staffCost(career, one.id, discount);
+        if (cost !== null && (!hire || cost < hire.cost)) hire = { one, cost };
+      }
+      if (hire && (!pick || hire.cost <= pick.cost)) {
+        if (hire.cost > coins - out.spent) return out;
+        out.spent += buyStaff(career, hire.one.id, coins - out.spent, discount);
+        out.notes.push(staffNote(career, hire.one) + ' -' + hire.cost.toLocaleString());
         continue;
       }
       if (!pick || pick.cost > coins - out.spent) return out;
@@ -2157,7 +2208,7 @@ h3,
 
   window.Career = {
     GEAR, TIERS, fresh, sanitize,
-    gearBonus, clubBonus, gearEffect, nextTier, gearCost, buyGear, autoBuy, GEAR_FIRST, CADDIE_COSTS, caddieBonus, caddieCost, buyCaddie,
+    gearBonus, clubBonus, gearEffect, nextTier, gearCost, buyGear, autoBuy, GEAR_FIRST, CADDIE_COSTS, caddieBonus, caddieCost, buyCaddie, STAFF, STAFF_COSTS, staffCost, buyStaff, staffNote,
     AUTO_RISKS, fillOffers, contractText, stakeName, acceptContract, dropContract, haggle, HAGGLE_AUTO,
     sponsorTerms, sponsorHoles, sponsorSlot, sponsorRate, LATE_PAY, fameMult, FAME_MAX, acceptSponsor, declineSponsor, autoPick,
     TOURS, TOUR_HOLES, TOUR_PRIZES, MAJOR, tournamentFee, enterTournament, tourHole, standings, rivalStyle, SEASON_LENGTH, SEASON_PRIZES, seasonTable, ordinal, underPressure, autoTier, placeText, theName,
@@ -2877,7 +2928,7 @@ h3,
   const MIGRATIONS = {};
   // Which build this is. tools/single-file.js writes the date and commit in
   // here when it builds the game for sharing; run from the project it stays 'dev'.
-  const BUILD = "2026-10-11 (55b026a)";
+  const BUILD = "2026-10-11 (51365d0)";
   // Where the newest shared build says which build it is, and where it can be
   // played or downloaded. A shared copy looks there now and then to see
   // whether it has been overtaken; nothing is sent.
@@ -2981,6 +3032,7 @@ h3,
 
   // Things legacy points can be spent on. Each is bought one level at a time
   // and lasts for good. costs[i] is the price of level i + 1.
+  const SEED_COINS = [0, 1000, 10000, 100000];   // what Seed money gives at each level
   const SHOP = [
     {
       id: 'headStart', name: 'Head start', costs: [4, 6, 8, 10, 12],
@@ -2996,7 +3048,7 @@ h3,
     },
     {
       id: 'seed', name: 'Seed money', costs: [3, 5, 8],
-      text: n => 'New careers begin with ' + [0, 1000, 10000, 100000][n].toLocaleString() + ' coins'
+      text: n => 'New careers begin with ' + SEED_COINS[n].toLocaleString() + ' coins'
     },
     {
       id: 'nerve', name: "Old pro's nerve", costs: [10],
@@ -3185,6 +3237,9 @@ h3,
   };
 
   let save = loadSave();
+  // a career begun before purchases were given at once is brought up to what its shop has bought
+  // (all but Seed money, which cannot be told from coins since spent)
+  for (const id of ['headStart', 'bag', 'reputation']) applyShopNow(id);
   let stats = buildStats();
   if (stats.sponsorSlots < 2) save.career.sponsor2 = null;   // a second deal needs the perk that allows it
   let hole = null;
@@ -6524,6 +6579,22 @@ h3,
     caddie.appendChild(make('span', 'pay', caddieCost === null ? 'As good as a caddie gets'
       : (!career.caddie ? 'Hire' : 'Improve to +' + Math.round((Career.caddieBonus(career) + 0.02) * 100) + '%') + ': ' + caddieCost.toLocaleString() + ' coins'));
     el.gear.appendChild(caddie);
+    // the staff, hired and improved like the caddie, at prices for a career that has bought its equipment
+    for (const hire of Career.STAFF) {
+      const level = career.staff[hire.id];
+      const cost = Career.staffCost(career, hire.id, stats.gearDiscount);
+      const button = actionButton('', cost !== null && save.coins >= cost, () => {
+        save.coins -= Career.buyStaff(career, hire.id, save.coins, stats.gearDiscount);
+        logMoment(Career.staffNote(career, hire), '#f8b800');
+      });
+      button.className = 'gear';
+      button.appendChild(make('span', 'name', hire.name));
+      button.appendChild(make('span', 'detail', !level ? 'Not hired. Adds a level of ' + hire.boosts + ' when hired and each time they are improved'
+        : 'Hired: +' + level + ' ' + hire.boosts + ' (level ' + level + ' of ' + Career.STAFF_COSTS.length + ')'));
+      button.appendChild(make('span', 'pay', cost === null ? 'As good as they get'
+        : (!level ? 'Hire' : 'Improve') + ' (+' + (level + 1) + ' ' + hire.boosts + '): ' + cost.toLocaleString() + ' coins'));
+      el.gear.appendChild(button);
+    }
     renderBag();
   }
 
@@ -6760,7 +6831,7 @@ h3,
         logMoment('Funded a junior academy', '#f8b800');
       })));
 
-    box.appendChild(make('p', 'label', 'Legacy shop (lasting; start-of-career items apply from the next career)'));
+    box.appendChild(make('p', 'label', 'Legacy shop (lasting; what is bought for the start of a career is given to this one at once as well)'));
     for (const item of SHOP) {
       const level = legacy.shop[item.id];
       const cost = item.costs[level];
@@ -6772,6 +6843,7 @@ h3,
         actionButton(maxed ? 'Owned' : 'Buy', !maxed && legacy.points >= cost, () => {
           legacy.points -= cost;
           legacy.shop[item.id]++;
+          applyShopNow(item.id);
         })));
     }
     if (legacy.history.length) {
@@ -6827,11 +6899,29 @@ h3,
     say('A new career begins. Teeing off…');
   }
 
+  // Gives the career in progress what has just been bought for the start of
+  // one, since points from a retirement are spent after the next career has
+  // begun: sub-attributes, equipment and the tournaments open are lifted to
+  // what a new career would begin with and never lowered, and Seed money
+  // pays what the new level adds.
+  function applyShopNow(id) {
+    const shop = save.legacy.shop;
+    if (id === 'headStart') {
+      for (const sub of Attributes.SUBS) save.attrs[sub.id].level = Math.max(save.attrs[sub.id].level, 1 + shop.headStart);
+    } else if (id === 'bag') {
+      for (const g of Career.GEAR) save.career.gear[g.id] = Math.max(save.career.gear[g.id], shop.bag);
+    } else if (id === 'reputation') {
+      save.career.tour.unlocked = Math.max(save.career.tour.unlocked, shop.reputation);
+    } else if (id === 'seed') {
+      save.coins += SEED_COINS[shop.seed] - SEED_COINS[shop.seed - 1];
+    }
+  }
+
   // Resets everything a career owns, then applies what the legacy shop gives a new one.
   function startCareer() {
     const shop = save.legacy.shop;
     save.hole = 1;
-    save.coins = [0, 1000, 10000, 100000][shop.seed];
+    save.coins = SEED_COINS[shop.seed];
     save.careerRecords = freshCareerRecords();
     save.attrs = Attributes.fresh();
     for (const sub of Attributes.SUBS) save.attrs[sub.id].level = 1 + shop.headStart;
@@ -7012,7 +7102,7 @@ h3,
       'Career ' + (save.legacy.retirements + 1) + ', ' + save.holesPlayed.toLocaleString() + ' holes played, ' + Math.round(save.coins).toLocaleString() + ' coins',
       'Tournament: ' + (t ? Career.TOURS[t.tier].name + (t.pending ? ', starting next hole' : t.playoff ? ', play-off' : ', through ' + t.scores.length) : 'none') +
         '; top tier open: ' + Career.TOURS[career.tour.unlocked].name + '; season ' + career.season.number + ', ' + career.season.played + ' played',
-      'Equipment tiers: ' + Career.GEAR.map(g => career.gear[g.id]).join(' ') + '; caddie ' + career.caddie + (career.bench.length ? '; left out: ' + career.bench.join(', ') : ''),
+      'Equipment tiers: ' + Career.GEAR.map(g => career.gear[g.id]).join(' ') + '; caddie ' + career.caddie + '; staff ' + Career.STAFF.map(hire => career.staff[hire.id]).join(' ') + (career.bench.length ? '; left out: ' + career.bench.join(', ') : ''),
       'Switches: auto-accept ' + (career.auto ? 'on' : 'off') + ', auto-enter ' + (career.tour.auto ? 'on' : 'off') + ', auto-buy ' + (career.autoGear ? 'on' : 'off') +
         ', speed ' + speed + 'x, view ' + view + (reduceMotion ? ', reduce motion' : '') + (paused ? ', paused' : ''),
       'Window: ' + window.innerWidth + ' by ' + window.innerHeight
