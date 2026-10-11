@@ -1295,12 +1295,14 @@ h3,
   const MAJOR = 3;               // index of The Major, the win that allows retiring
   // Each is played on a course of its own: the same nine holes every time,
   // at a set difficulty (0..1, as a hole's own difficulty runs) and in one theme.
+  // signature is the name of the course's signature hole; which hole that is
+  // the game works out from the course.
   const TOURS = [
-    { name: 'Local Open', fee: 3, mean: 9, sd: 3, course: 'Pine Hollow', theme: 'parkland', difficulty: 0.35 },
-    { name: 'Regional Classic', fee: 5, mean: 8, sd: 3, course: 'Blackwood', theme: 'forest', difficulty: 0.55 },
-    { name: 'National Championship', fee: 8, mean: -2, sd: 2.5, course: 'Red Mesa', theme: 'desert', difficulty: 0.75 },
-    { name: 'The Major', fee: 12, mean: -4.2, sd: 2.5, course: 'St Brannoch', theme: 'links', difficulty: 0.9 },
-    { name: 'Legends Cup', fee: 18, mean: -6, sd: 2, course: 'Magnolia Hill', theme: 'parkland', difficulty: 1 }
+    { name: 'Local Open', fee: 3, mean: 9, sd: 3, course: 'Pine Hollow', signature: 'The Hollow', theme: 'parkland', difficulty: 0.35 },
+    { name: 'Regional Classic', fee: 5, mean: 8, sd: 3, course: 'Blackwood', signature: 'Dark Alley', theme: 'forest', difficulty: 0.55 },
+    { name: 'National Championship', fee: 8, mean: -2, sd: 2.5, course: 'Red Mesa', signature: 'Rattler', theme: 'desert', difficulty: 0.75 },
+    { name: 'The Major', fee: 12, mean: -4.2, sd: 2.5, course: 'St Brannoch', signature: 'The Saint', theme: 'links', difficulty: 0.9 },
+    { name: 'Legends Cup', fee: 18, mean: -6, sd: 2, course: 'Magnolia Hill', signature: 'Blossom', theme: 'parkland', difficulty: 1 }
   ];
   const COURSE_SEED = 900000;             // tournament courses are laid out from seeds far above any hole number
   const TOUR_CLOSING = 3;                 // holes at the end of a tournament played under pressure
@@ -1912,7 +1914,7 @@ h3,
   // What Course.generate needs to lay out hole `index` (0 to 8) of a tier's own course.
   function tourHole(tier, index) {
     const tour = TOURS[tier];
-    return { seed: COURSE_SEED + tier * 100 + index % TOUR_HOLES, difficulty: tour.difficulty, theme: tour.theme };
+    return { seed: COURSE_SEED + tier * 100 + index % TOUR_HOLES, difficulty: tour.difficulty, theme: tour.theme, tier, index: index % TOUR_HOLES };
   }
 
   // The leaderboard through the holes played so far, best first. Ties go to
@@ -2440,11 +2442,13 @@ h3,
     return null;
   }
 
-  // Scenery only: trees in the rough around the hole.
-  // Scenery: trees in a line down both sides of the hole, a little way into
-  // the rough, with a second, broken row behind them, and a few beyond each
-  // end. None stands in sand or water. They are for show: a ball passes them.
+  // Trees in a line down both sides of the hole, a little way into the rough,
+  // with a second, broken row behind them, and a few beyond each end. None
+  // stands in sand or water. The nearer row stops a ball like any tree in
+  // play (`stops`), except on a links, where it is low gorse; the rest are
+  // for show.
   function placeTrees(rng, hole) {
+    const solid = hole.theme !== 'links';
     const trees = [];
     const clear = (x, z) => !hole.hazards.some(h => inEllipse(h, x, z, 12));
     const line = hole.line;
@@ -2461,7 +2465,7 @@ h3,
           const along = (rng() - 0.5) * len * 0.5;
           const x = line[i].x + az * out + ax * along;
           const z = line[i].z - ax * out + az * along;
-          if (clear(x, z)) trees.push({ x, z, size: 0.8 + rng() * 0.7 });
+          if (clear(x, z)) trees.push({ x, z, size: 0.8 + rng() * 0.7, stops: solid && row === 0 });
         }
       }
     }
@@ -2584,6 +2588,8 @@ h3,
     }
 
     hole.trees = placeTrees(rng, hole);
+    // everything that stops a ball: the trees in play and the nearer row down each side
+    hole.solid = hole.obstacles.concat(hole.trees.filter(tree => tree.stops));
     return hole;
   }
 
@@ -2839,6 +2845,7 @@ h3,
   const ICONS = {
     conifer: ['..k..', '.kpk.', '.kpk.', 'kpppk', 'kkkkk', '..n..'],
     tree: ['.kkk.', 'kdldk', 'kdddk', '.kkk.'],
+    wood: ['.kkk.', 'kpdpk', 'kpppk', '.kkk.'],      // a tree in the row that stops a ball
     flag: ['wrrr', 'wrrr', 'w...', 'w...', 'w...', 'k...'],
     golfer: ['.w.', '.s.', 'rrr', '.b.', '.b.'],
     caddie: ['.p.', '.s.', 'www', '.w.', '.w.']
@@ -2870,7 +2877,7 @@ h3,
   const MIGRATIONS = {};
   // Which build this is. tools/single-file.js writes the date and commit in
   // here when it builds the game for sharing; run from the project it stays 'dev'.
-  const BUILD = "2026-10-10 (d79a5a4)";
+  const BUILD = "2026-10-11 (55b026a)";
   // Where the newest shared build says which build it is, and where it can be
   // played or downloaded. A shared copy looks there now and then to see
   // whether it has been overtaken; nothing is sent.
@@ -2914,6 +2921,7 @@ h3,
   const EDGE = 6;
   const TREE_RADIUS = 10;        // a tree's canopy, which stops a ball in the air
   const TREE_HEIGHT = 46;        // balls flying higher than this clear the trees
+  const CACTUS_HEIGHT = 38;      // a cactus as drawn at full size, before one that stops a ball is stretched to a tree's height
   const TRUNK_RADIUS = 3;        // what a rolling ball can hit
   const CROWN_BASE = 12;         // a tree's branches start this high; a ball below them can only hit the trunk
   // A punch: a low shot played to stay under the branches. It goes less far
@@ -3242,10 +3250,12 @@ h3,
   // the legacy points it banked. trophies counts tournament wins by tier
   // over every career. rivals keeps, for each rival met, the tournaments
   // played against them and how many of those the player finished ahead in.
+  // courseRecords is the player's best nine against par in a tournament on
+  // each tier's course, over every career, or null where none has been finished.
   function freshLegacy() {
     const shop = {};
     for (const item of SHOP) shop[item.id] = 0;
-    return { points: 0, total: 0, retirements: 0, shop, history: [], trophies: Career.TOURS.map(() => 0), played: 0, seasons: 0, rivals: {} };
+    return { points: 0, total: 0, retirements: 0, shop, history: [], trophies: Career.TOURS.map(() => 0), courseRecords: Career.TOURS.map(() => null), played: 0, seasons: 0, rivals: {} };
   }
 
   // Lifetime points count in full up to LEGACY_FULL and taper after that.
@@ -3354,6 +3364,9 @@ h3,
           if (!Array.isArray(raw.legacy.trophies)) s.legacy.trophies = s.career.tour.wins.slice();
           if (Array.isArray(raw.legacy.trophies)) {
             s.legacy.trophies = Career.TOURS.map((tour, i) => (Number.isFinite(raw.legacy.trophies[i]) && raw.legacy.trophies[i] >= 0 ? Math.floor(raw.legacy.trophies[i]) : 0));
+          }
+          if (Array.isArray(raw.legacy.courseRecords)) {
+            s.legacy.courseRecords = Career.TOURS.map((tour, i) => (Number.isSafeInteger(raw.legacy.courseRecords[i]) ? raw.legacy.courseRecords[i] : null));
           }
           // likewise the count of tournaments played, which was kept for the career alone
           s.legacy.played = Number.isFinite(raw.legacy.played) && raw.legacy.played >= 0 ? Math.floor(raw.legacy.played) : s.career.tour.played;
@@ -3645,6 +3658,24 @@ h3,
     return t ? Career.tourHole(t.tier, t.playoff ? t.playoff.holes : t.scores.length) : null;
   }
 
+  // Every tournament course has a signature hole: the one of its nine with
+  // the most sand and water on it, the later hole where two are level. It is
+  // found from the course as it is laid out, so it stays true when courses change.
+  const signatures = [];
+  function signatureHole(tier) {
+    if (signatures[tier] === undefined) {
+      let most = -1;
+      for (let i = 0; i < Career.TOUR_HOLES; i++) {
+        const trouble = Course.generate(0, Career.tourHole(tier, i)).hazards.reduce((sum, h) => sum + h.rx * h.rz, 0);
+        if (trouble >= most) {
+          most = trouble;
+          signatures[tier] = i;
+        }
+      }
+    }
+    return signatures[tier];
+  }
+
   // How much tiredness adds to every shot's error on the hole being played, as a share: 0 when fresh.
   function fatigue() {
     const tournament = tournamentInPlay();
@@ -3676,7 +3707,7 @@ h3,
   }
 
   function nearTree(x, z, reach, skip) {
-    for (const t of hole.obstacles) {
+    for (const t of hole.solid) {
       if (t === skip) continue;
       const dx = x - t.x;
       const dz = z - t.z;
@@ -3952,7 +3983,7 @@ h3,
     const ground = Course.groundAt(hole, ball.x, ball.z);
     const lie = ground === 'sand' || ground === 'rough' ? ground : null;
     const putt = !lie && dist <= PUTT_RANGE && rollIsClear(hole.cup.x, hole.cup.z);
-    underTree = hole.obstacles.find(t => Math.hypot(ball.x - t.x, ball.z - t.z) < TREE_RADIUS + 2) || null;
+    underTree = hole.solid.find(t => Math.hypot(ball.x - t.x, ball.z - t.z) < TREE_RADIUS + 2) || null;
 
     plan = {
       putt, lie, dist,
@@ -4147,7 +4178,7 @@ h3,
     }
     if (lie) {
       holeEvents[lie] = true;
-      earn('recovery', lie === 'sand' ? 2 : 1, lie === 'sand' ? 'sand shots' : 'shots from rough');
+      earn('recovery', lie === 'sand' ? 4 : 3, lie === 'sand' ? 'sand shots' : 'shots from rough');
       if (Math.random() < stats.escape) {
         earn('recovery', 2, 'great escapes');
         moments.push(['Great escape', '#f8d878']);
@@ -4253,7 +4284,7 @@ h3,
       splash();
       return;
     }
-    for (const t of hole.obstacles) {
+    for (const t of hole.solid) {
       const dx = ball.x - t.x;
       const dz = ball.z - t.z;
       // in the air a ball meets the crown, unless it is under the branches, where like a rolling ball it can only meet the trunk
@@ -4484,6 +4515,14 @@ h3,
         showOverlay('season', SEASON_TIME);
       }
       if (career.tour.place === 1) save.legacy.trophies[tournament.tier]++;
+      // the nine holes against par; a play-off's holes are no part of it
+      const total = tournament.scores.reduce((a, b) => a + b, 0);
+      const best = save.legacy.courseRecords[tournament.tier];
+      if (best === null || total < best) {
+        save.legacy.courseRecords[tournament.tier] = total;
+        card.final.record = true;
+        career.notes.push('Course record at ' + Career.TOURS[tournament.tier].course + ': ' + toPar(total));
+      }
       card.final.rows.forEach((row, i) => {
         if (row.you) return;
         const rival = save.legacy.rivals[row.name] || (save.legacy.rivals[row.name] = { met: 0, beaten: 0 });
@@ -4574,7 +4613,9 @@ h3,
 
   function startHole() {
     if (reloadForUpdate()) return;   // between holes is the moment to pick up a newer build
-    hole = Course.generate(save.hole, tournamentHole());
+    const course = tournamentHole();
+    hole = Course.generate(save.hole, course);
+    hole.course = course;          // where on a tournament's course this hole is, or null
     theme = THEMES[hole.theme] || THEMES.parkland;
     ball = { x: hole.tee.x, z: hole.tee.z, vx: 0, vz: 0, travelled: 0, carry: 0, curve: 0, apex: 0 };
     lastPos = { x: ball.x, z: ball.z };
@@ -5291,8 +5332,10 @@ h3,
   }
 
   // What stands around the hole on courses that are not parkland: low gorse
-  // on a links, firs in a forest, cactus in the desert.
-  function drawScenery(base, s) {
+  // on a links, firs in a forest, cactus in the desert. A cactus that stops a
+  // ball is drawn dark, like every tree that does.
+  function drawScenery(base, s, solid) {
+    const body = solid ? PAL.far : PAL.fairwayDark;
     const outlined = (x, y, w, h, color) => {
       ctx.fillStyle = PAL.black;
       ctx.fillRect(x - LINE, y - LINE, w + 2 * LINE, h + 2 * LINE);
@@ -5305,12 +5348,12 @@ h3,
       ctx.fillRect(base.x - 5 * s, base.y - 7 * s, 3 * s, 2 * s);
       ctx.fillRect(base.x + 2 * s, base.y - 5 * s, 3 * s, 2 * s);
     } else if (theme.scenery === 'cactus') {
-      outlined(base.x - 11 * s, base.y - 24 * s, 4 * s, 10 * s, PAL.fairwayDark);   // left arm
-      outlined(base.x - 11 * s, base.y - 16 * s, 9 * s, 4 * s, PAL.fairwayDark);
-      outlined(base.x + 7 * s, base.y - 30 * s, 4 * s, 12 * s, PAL.fairwayDark);    // right arm
-      outlined(base.x + 2 * s, base.y - 21 * s, 9 * s, 4 * s, PAL.fairwayDark);
-      outlined(base.x - 3 * s, base.y - 38 * s, 6 * s, 38 * s, PAL.fairwayDark);    // trunk, over the joins
-      ctx.fillStyle = PAL.fairway;
+      outlined(base.x - 11 * s, base.y - 24 * s, 4 * s, 10 * s, body);   // left arm
+      outlined(base.x - 11 * s, base.y - 16 * s, 9 * s, 4 * s, body);
+      outlined(base.x + 7 * s, base.y - 30 * s, 4 * s, 12 * s, body);    // right arm
+      outlined(base.x + 2 * s, base.y - 21 * s, 9 * s, 4 * s, body);
+      outlined(base.x - 3 * s, base.y - 38 * s, 6 * s, 38 * s, body);    // trunk, over the joins
+      ctx.fillStyle = solid ? PAL.rough : PAL.fairway;
       ctx.fillRect(base.x - 3 * s, base.y - 38 * s, 2 * s, 38 * s);
     } else {
       // a fir: a trunk and two green tiers, lighter than the dark conifers in play
@@ -5338,11 +5381,18 @@ h3,
       drawConifer(base);
       return;
     }
-    const s = base.s * tree.size;
-    if (theme.scenery !== 'tree') {
-      drawScenery(base, s);
+    // the nearer row down each side stops a ball as a tree in play does, so
+    // it is drawn dark like one and as tall as the height it stops a ball at
+    if (tree.stops && theme.scenery === 'conifer') {
+      drawConifer(base);
       return;
     }
+    if (theme.scenery !== 'tree') {
+      if (tree.stops) drawScenery(base, base.s * TREE_HEIGHT / CACTUS_HEIGHT, true);
+      else drawScenery(base, base.s * tree.size);
+      return;
+    }
+    const s = base.s * (tree.stops ? 1 : tree.size);
     ctx.fillStyle = PAL.trunk;
     ctx.fillRect(base.x - 1.5 * s, base.y - 16 * s, 3 * s, 16 * s);
     // the crown leans a pixel one way and then the other in a wind, each tree in its own time
@@ -5351,12 +5401,12 @@ h3,
     base.x += sway;
     ctx.beginPath();
     ctx.arc(base.x, base.y - 30 * s, 16 * s, 0, Math.PI * 2);
-    ctx.fillStyle = PAL.fairwayDark;
+    ctx.fillStyle = tree.stops ? PAL.far : PAL.fairwayDark;
     ctx.fill();
     ctx.strokeStyle = PAL.black;
     ctx.lineWidth = LINE;
     ctx.stroke();
-    ctx.fillStyle = PAL.fairway;
+    ctx.fillStyle = tree.stops ? PAL.rough : PAL.fairway;
     ctx.beginPath();
     ctx.arc(base.x - 4 * s, base.y - 34 * s, 8 * s, 0, Math.PI * 2);
     ctx.fill();
@@ -5812,7 +5862,8 @@ h3,
     ctx.fillStyle = PAL.white;
     ctx.fillRect(PANEL_W, 0, 1, PIXEL_H);
     const line = (text, y, color) => pixelText(text, 3, y, color || PAL.white, 1, 'left');
-    line('HOLE ' + hole.number, 38, PAL.gold);
+    // in a tournament the hole goes by its number on the course, 1 to 9
+    line('HOLE ' + (hole.course ? hole.course.index + 1 : hole.number), 38, PAL.gold);
     line('PAR ' + hole.par, 46);
     line('SHOT ' + Math.min(MAX_STROKES, strokes + (phase === 'aiming' ? 1 : 0)), 54);
     if (plan && phase !== 'holed') {
@@ -5822,6 +5873,7 @@ h3,
     }
     line('DIFF ' + Math.round(hole.difficulty * 100) + '%', 98, PAL.grey);
     line(theme.name, 120, PAL.grey);
+    if (hole.course && hole.course.index === signatureHole(hole.course.tier)) line(Career.TOURS[hole.course.tier].signature, 130, PAL.gold);
     line('FORM ' + (momentum > 0 ? '+' : '') + momentum, 106, momentum > 0 ? PAL.skin : momentum < 0 ? PAL.sky : PAL.grey);
 
     // everything standing on the map
@@ -5850,7 +5902,7 @@ h3,
       ctx.fillStyle = PAL.fairway;
       ctx.fillRect(p.x - 1, p.y - 1, 2, 2);
     }
-    for (const tree of hole.trees) icon(Sprites.ICONS.tree, tree.x, tree.z);
+    for (const tree of hole.trees) icon(tree.stops ? Sprites.ICONS.wood : Sprites.ICONS.tree, tree.x, tree.z);
     // trees nearer the bottom of the map overlap the ones above them
     for (const tree of hole.obstacles.slice().sort((a, b) => a.x - b.x)) icon(Sprites.ICONS.conifer, tree.x, tree.z);
 
@@ -5941,7 +5993,9 @@ h3,
     let taken = 0;
     for (let i = 0; i < Career.TOUR_HOLES; i++) {
       const row = card.rows[i];
-      pixelText(first + i, column(i), HOLE_Y, PAL.grey);
+      // a tournament's holes go by their numbers on the course, the signature hole's in gold
+      if (card.tour) pixelText(i + 1, column(i), HOLE_Y, i === signatureHole(card.tour.tier) ? PAL.gold : PAL.grey);
+      else pixelText(first + i, column(i), HOLE_Y, PAL.grey);
       if (!row) {
         // holes still to play: par is known, the score is not
         pixelText(card.tour ? Course.par(0, Career.tourHole(card.tour.tier, i)) : Course.par(first + i), column(i), PAR_Y, PAL.grey);
@@ -5975,6 +6029,10 @@ h3,
       pixelText(final
         ? Career.placeText(final.place) + ' PLACE' + (final.prize ? '  +' + final.prize.toLocaleString() + ' COINS' : '')
         : card.tour.playoff ? 'PLAY-OFF, HOLE ' + (card.tour.playoff.holes + 1) : through, PIXEL_W / 2, 120, final ? PAL.gold : PAL.grey);
+      const course = Career.TOURS[card.tour.tier].course;
+      const record = save.legacy.courseRecords[card.tour.tier];
+      if (final && final.record) pixelText('NEW COURSE RECORD AT ' + course + ': ' + toPar(record), PIXEL_W / 2, 130, PAL.gold);
+      else pixelText(course + (record === null ? '' : '  COURSE RECORD ' + toPar(record)), PIXEL_W / 2, 130, PAL.grey);
     } else {
       const score = taken - par;
       pixelText(card.rows.length ? through : 'NO HOLES ON THIS CARD YET', PIXEL_W / 2, 80, PAL.white);
@@ -6254,6 +6312,8 @@ h3,
         ['Careers', count(save.legacy.retirements + 1)]
       ])],
       ['Trophy cabinet (wins in every career)', Career.TOURS.map((tour, i) => [tour.name, count(save.legacy.trophies[i])])],
+      ['Course records (best nine in a tournament, in every career)', Career.TOURS.map((tour, i) =>
+        [tour.course, save.legacy.courseRecords[i] === null ? '-' : toPar(save.legacy.courseRecords[i])])],
       ['Rivals (tournaments together, finished ahead of them)', Object.keys(save.legacy.rivals)
         .sort((a, b) => save.legacy.rivals[b].met - save.legacy.rivals[a].met)
         .map(name => {
@@ -6558,6 +6618,9 @@ h3,
       box.appendChild(make('p', 'label', tour.name + ', ' + (t.playoff
         ? 'play-off with ' + t.playoff.names.join(' and ') + ', hole ' + (t.playoff.holes + 1)
         : played ? 'at ' + tour.course + ', through ' + played + ' of ' + Career.TOUR_HOLES : 'at ' + tour.course + ', starting on the next hole')));
+      const record = save.legacy.courseRecords[t.tier];
+      box.appendChild(make('p', 'muted', 'Signature hole: the ' + Career.ordinal(signatureHole(t.tier) + 1) + ', ' + tour.signature + '.' +
+        (record === null ? '' : ' Your course record: ' + toPar(record) + '.')));
       Career.standings(t).forEach((row, i) => {
         const line = make('div', row.you ? 'board-row you' : 'board-row');
         line.appendChild(make('span', 'place', Career.placeText(i + 1)));
@@ -6594,7 +6657,9 @@ h3,
       box.appendChild(dealRow(
         tour.name,
         unlocked
-          ? Career.TOUR_HOLES + ' holes at ' + tour.course + ' (' + tour.theme + ') against three rivals. ' + (wins ? 'Won ' + wins + (wins === 1 ? ' time.' : ' times.') : 'Not won yet.')
+          ? Career.TOUR_HOLES + ' holes at ' + tour.course + ' (' + tour.theme + ') against three rivals. ' + (wins ? 'Won ' + wins + (wins === 1 ? ' time.' : ' times.') : 'Not won yet.') +
+            ' Signature hole: the ' + Career.ordinal(signatureHole(i) + 1) + ', ' + tour.signature + '.' +
+            (save.legacy.courseRecords[i] === null ? '' : ' Your course record: ' + toPar(save.legacy.courseRecords[i]) + '.')
           : 'Win ' + Career.theName(i - 1) + ' to unlock.',
         'Entry ' + fee.toLocaleString() + ', first prize ' + Math.round(fee * Career.TOUR_PRIZES[0]).toLocaleString() + ' coins',
         actionButton('Enter', unlocked && save.coins >= fee, () => {
