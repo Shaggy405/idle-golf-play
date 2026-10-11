@@ -757,6 +757,13 @@ footer {
   align-self: flex-end;
 }
 
+/* the tester's report a change answers, after the change itself */
+.news-list .report {
+  margin-left: 8px;
+  color: #f8b800;
+  white-space: nowrap;
+}
+
 /* which build of the game this is, at the start of the row of buttons */
 .build {
   margin-right: auto;
@@ -961,6 +968,7 @@ h3,
         <span id="build" class="build"></span>
         <button id="whats-new" class="action" type="button">What's new</button>
         <button id="feedback" class="action" type="button">Send feedback</button>
+        <button id="my-reports" class="action" type="button">My reports</button>
         <button id="export-save" class="action" type="button">Export save</button>
         <button id="import-save" class="action" type="button">Import save</button>
         <button id="restore-save" class="action" type="button">Restore backup</button>
@@ -984,8 +992,21 @@ h3,
 // holds this up once when a newer build is first opened, and the "What's new"
 // button at the foot of the page shows all of it. Add an entry at the top,
 // with the next id, every time a build is published; write for the player
-// (what they will see), and say where a change answers a report.
+// (what they will see). Where a change answers a tester's report, write the
+// item as { text, issue } with the report's number, and the list links to it.
 const Changes = [
+  {
+    id: 4,
+    date: '2026-10-11',
+    items: [
+      { issue: 2, text: 'Auto-accept now haggles over every contract it could take, then takes the best of what that leaves. The offers left on the board say how their haggle went.' },
+      'Topspin: a tee shot that cannot reach the green may be hit with topspin, which carries as far and runs further, with a little more distance error. The plan line names it, and it earns Grip positioning experience.',
+      'Two new kinds of contract: hit a number of fairways from the tee, and hit a number of drives your full distance or further. The Form card on the Golfer tab shows how often you do each.',
+      'The caddie holds the flag while the golfer putts, and raises a fist with the golfer at a birdie or better.',
+      '"My reports", beside Send feedback, opens the reports you have sent, open and closed, so you can read any reply.',
+      'In this list, a change that answers a report now links to it.'
+    ]
+  },
   {
     id: 3,
     date: '2026-10-11',
@@ -998,7 +1019,7 @@ const Changes = [
     id: 2,
     date: '2026-10-11',
     items: [
-      'The golfer no longer hits ball after ball into the same water (reported by a tester). In a strong wind it used to pick a spot it could not reach, come down short in the water, and play the same shot again until the hole was given up. It now works out where the wind will really put the ball before choosing a shot, and lays up short or out sideways when nothing else stays dry.',
+      { issue: 10, text: 'The golfer no longer hits ball after ball into the same water. In a strong wind it used to pick a spot it could not reach, come down short in the water, and play the same shot again until the hole was given up. It now works out where the wind will really put the ball before choosing a shot, and lays up short or out sideways when nothing else stays dry.' },
       'After a ball in the water the golfer gives trouble a wider berth for the rest of that hole, and does not misread it again.'
     ]
   },
@@ -1181,7 +1202,7 @@ const Changes = [
       case 'swingSpeed': return percent(fx.carry) + ' of a shot in the air, play speed x' + fx.timeScale.toFixed(2) + '. In rhythm (no wait) after ' + percent(fx.inRhythm) + ' of shots';
       case 'recovery': return 'Keeps ' + percent(fx.sandReach) + ' of distance from sand and ' + percent(fx.roughReach) + ' from rough. Great escape on ' + percent(fx.escape) + ' of bad lies';
       case 'aimAccuracy': return 'Aim error x' + fx.aimMult.toFixed(2) + '. Pure strike on ' + percent(fx.pureStrike) + ' of full shots';
-      case 'grip': return 'Backspin up to ' + percent(fx.maxSpin) + ', bend up to ' + Math.round(fx.maxCurve * 180 / Math.PI) + '°, distance error x' + fx.gripMult.toFixed(2) + '. Dialled in on ' + percent(fx.dialledIn) + ' of spun or bent shots';
+      case 'grip': return 'Backspin and topspin up to ' + percent(fx.maxSpin) + ', bend up to ' + Math.round(fx.maxCurve * 180 / Math.PI) + '°, distance error x' + fx.gripMult.toFixed(2) + '. Dialled in on ' + percent(fx.dialledIn) + ' of spun or bent shots';
       case 'putting': return 'Putting error x' + (fx.puttFactor / 0.55).toFixed(2) + '. Clutch putt on ' + percent(fx.clutchPutt) + ' of putts';
       case 'shotCalc': return 'Ignores hazards on ' + percent(fx.misread) + ' of shots. Free drop on ' + percent(fx.freeDrop) + ' of water balls';
       case 'landingPrediction': return 'Misjudges spin and bend by about ' + percent(fx.spinSigma) + '. Pin high on ' + percent(fx.pinHigh) + ' of shots at the flag';
@@ -1362,6 +1383,17 @@ const Changes = [
       min: 3, max: 6, form: 'clean', pay: 0.7,
       test: r => r.holed && r.clean === true
     },
+    fairways: {
+      text: n => 'Hit ' + n + ' fairways from the tee',
+      min: 3, max: 6, form: 'fairway', pay: 0.7,
+      test: r => r.fairway === true
+    },
+    // a tee shot at a par 4 or 5 that goes as far as the golfer's driver is good for, or further
+    drives: {
+      text: n => 'Hit ' + n + ' drives your full distance or further',
+      min: 3, max: 6, form: 'drive', pay: 0.8,
+      test: r => r.drive === true
+    },
     // A score to beat over a set of holes rather than something to do on
     // each: the contract's limit is the total against par to finish at or
     // under, sized from the golfer's usual score and how much it varies.
@@ -1514,7 +1546,7 @@ const Changes = [
   // varies about that (spread, the variance). Starts at a beginner's guess
   // and follows play from there.
   function freshForm() {
-    return { bogey: 0.55, dry: 0.75, par: 0.25, birdie: 0.05, green: 0.15, twoPutt: 0.6, clean: 0.4, score: 1, spread: 1.2 };
+    return { bogey: 0.55, dry: 0.75, par: 0.25, birdie: 0.05, green: 0.15, twoPutt: 0.6, clean: 0.4, fairway: 0.3, drive: 0.15, score: 1, spread: 1.2 };
   }
 
   function freshTour() {
@@ -2004,7 +2036,8 @@ const Changes = [
   // Takes the best contract on offer that its risk setting allows if none is
   // active (waiting for a later offer if none does), and signs the sponsor
   // offer if there is room for it or it is worth more a hole than the deal it would replace. With a good enough
-  // chance (0..1) it haggles over each first. slots is how many sponsors
+  // chance (0..1) it haggles first: over every contract it could take, and
+  // over the sponsor offer. slots is how many sponsors
   // can be held at once. Returns the signing
   // coins, negotiation experience and notes for the log.
   function autoPick(career, chance, slots) {
@@ -2016,10 +2049,14 @@ const Changes = [
       if (won) out.xp += 3;
       out.notes.push(won ? 'Haggled ' + what + ' up' : 'Haggling over ' + what + ' backfired');
     };
-    let best = -1;
-    career.offers.forEach((offer, i) => {
-      if (autoAllows(career, offer) && (best < 0 || contractRate(offer) > contractRate(career.offers[best]))) best = i;
-    });
+    const pick = () => {
+      let best = -1;
+      career.offers.forEach((offer, i) => {
+        if (autoAllows(career, offer) && (best < 0 || contractRate(offer) > contractRate(career.offers[best]))) best = i;
+      });
+      return best;
+    };
+    let best = pick();
     // a contract running late holds up the next one: it is let go when an offer is worth that much more a hole
     const running = career.contract;
     if (running && running.late && best >= 0 && contractRate(career.offers[best]) >= LATE_DROP * lateRate(running, career.form)) {
@@ -2028,7 +2065,11 @@ const Changes = [
     }
     if (!career.contract) {
       if (best >= 0) {
-        talk(career.offers[best], 'a contract');
+        // every offer it could take is haggled over, and the best of what that leaves is the one taken
+        career.offers.forEach(offer => {
+          if (autoAllows(career, offer)) talk(offer, 'a contract');
+        });
+        best = pick();
         acceptContract(career, best);
         out.notes.push('Took contract: ' + contractText(career.contract));
       }
@@ -2206,7 +2247,8 @@ const Changes = [
   // ---------- per hole ----------
 
   // Settles everything after a hole. result is { holed, strokes, par, waterBalls,
-  // putts, green (reached in regulation), clean (no sand, water or tree) };
+  // putts, green (reached in regulation), clean (no sand, water or tree),
+  // fairway (the tee shot at a par 4 or 5 stopped on it), drive (and went the golfer's full distance) };
   // terms is { base, contractMult, sponsorMult, slots, coins, haggle, sponsors } for pricing and
   // counting new offers, for what the golfer can afford, for the chance a haggle works,
   // and for how many sponsors can be held at once.
@@ -3064,7 +3106,7 @@ const Changes = [
   const MIGRATIONS = {};
   // Which build this is. tools/single-file.js writes the date and commit in
   // here when it builds the game for sharing; run from the project it stays 'dev'.
-  const BUILD = "2026-10-11 (c33bc86)";
+  const BUILD = "2026-10-11 (401897c)";
   // Where the newest shared build says which build it is, and where it can be
   // played or downloaded. A shared copy looks there now and then to see
   // whether it has been overtaken; nothing is sent.
@@ -3073,6 +3115,11 @@ const Changes = [
   const UPDATE_EVERY = 5 * 60 * 1000;   // milliseconds between looks
   // Where "Send feedback" opens a new report, already filled in.
   const FEEDBACK_URL = 'https://github.com/Shaggy405/idle-golf-play/issues/new';
+  // Where a report can be read once it is sent: What's new links a change to the report it answers.
+  const REPORT_URL = 'https://github.com/Shaggy405/idle-golf-play/issues/';
+  // Where "My reports" goes: the reports sent from whichever GitHub account
+  // the player is signed in to, open and closed, with any replies to them.
+  const MY_REPORTS_URL = 'https://github.com/Shaggy405/idle-golf-play/issues?q=' + encodeURIComponent('is:issue author:@me sort:updated-desc');
   const PREFS_KEY = 'idle-golf-prefs-v1';   // which tab is open and the play speed; not part of the save
   const WORLD_W = Course.WIDTH;
   const WORLD_L = Course.LENGTH;
@@ -3089,6 +3136,8 @@ const Changes = [
   const SAND_COST = 40;          // and rather than sand
   const PUTT_RANGE = 110;
   const SPIN_CARRY = 0.97;       // fraction of a shot spent in the air at full backspin
+  const TOPSPIN = 0.06;          // how much further a drive runs at full topspin, as a share of its distance; topspin is spin below zero
+  const TOP_COST = 4;            // what the shot planner wants back, in units nearer the cup, before it plays one
   const CUP_RADIUS = 1;          // the hole is small: a putt has to be on line and dying to drop
   const PUTT_AIM_FLOOR = 0.1;    // aim error no amount of skill removes from a putt, radians
   const PUTT_POWER_FLOOR = 0.05; // and the same for pace, as a fraction of the distance
@@ -3333,6 +3382,7 @@ const Changes = [
     form: document.getElementById('form-box'),
     exportSave: document.getElementById('export-save'),
     feedback: document.getElementById('feedback'),
+    myReports: document.getElementById('my-reports'),
     build: document.getElementById('build'),
     news: document.getElementById('news'),
     newsList: document.getElementById('news-list'),
@@ -3432,6 +3482,7 @@ const Changes = [
   let holeEvents = {};           // awkward situations met this hole, for Study
   let holePutts = 0;             // putts taken this hole
   let greenInReg = false;        // the ball was on the green with two strokes of par still in hand
+  let teeShot = { fairway: false, drive: false };   // at a par 4 or 5: the tee shot stopped on the fairway, and went the golfer's full distance
   let holeShots = [];            // each shot of the hole in progress: what was planned and how it turned out
   let underTree = null;          // the tree the ball lies under, if any; the next shot punches out from beneath it
   let treeHit = false;           // the shot in progress has hit a tree
@@ -3823,7 +3874,14 @@ const Changes = [
   // and pushed toward SPIN_CARRY by backspin.
   function carryFraction(spin, club) {
     const base = Math.min(0.95, stats.carry + club.carry);
+    // topspin carries as far and runs further, so less of the whole shot is in the air
+    if (spin < 0) return base / topRun(spin);
     return base + (Math.max(SPIN_CARRY, base) - base) * spin;
+  }
+
+  // How much further than the club's usual distance a shot with topspin goes.
+  function topRun(spin) {
+    return spin < 0 ? 1 - TOPSPIN * spin : 1;
   }
 
   // The same for a shot played as a punch (low) or not, with a swing of any size.
@@ -4041,7 +4099,7 @@ const Changes = [
   // is done twice: once for the shot as planned, once for the shot it became.
   // Against a strong wind the longest club may not get there at all.
   function aimOff(tx, tz, d, club, spin, curve, lie, low, swing, felt, allow) {
-    const longest = clubReach(pickClub(Infinity, lie, low), lie, low) * swing;
+    const longest = clubReach(pickClub(Infinity, lie, low), lie, low) * swing * topRun(spin);
     const aimed = { d, club, push: 0, x: tx, z: tz, heading: 0 };
     let bent = null;
     for (let pass = 0; pass < 2; pass++) {
@@ -4261,6 +4319,24 @@ const Changes = [
             };
           }
         }
+        // A tee shot at full stretch that cannot get home may be hit with
+        // topspin: it carries as far and runs on, if what it runs over lets it.
+        if (df === 1 && !layUp && !lie && reach >= longest && standing(lie) === 'tee') {
+          const spin = -stats.maxSpin;
+          const far = Math.min(d * topRun(spin), Math.hypot(hole.cup.x - ball.x, hole.cup.z - ball.z));
+          const carry = far * carryFraction(spin, club);
+          const run = carry + rollOut(ball.x + Math.sin(toward) * carry, ball.z + Math.cos(toward) * carry, toward, far - carry);
+          const fx = ball.x + Math.sin(toward) * run;
+          const fz = ball.z + Math.cos(toward) * run;
+          let score = Math.hypot(hole.cup.x - fx, hole.cup.z - fz) + TOP_COST;
+          if (Course.hazardAt(hole, fx, fz, 6) === 'sand') score += SAND_COST;
+          else if (Course.inRough(hole, fx, fz)) score += ROUGH_COST;
+          const ex = ball.x + Math.sin(toward) * far;
+          const ez = ball.z + Math.cos(toward) * far;
+          if ((!best || score < best.score) && !shotTrouble(toward, far, spin, 0, margin, club) && !(blown && windTrouble(ex, ez, far, spin, 0, margin, club, lie))) {
+            best = { heading: toward, d: far, spin, curve: 0, score, tx: ex, tz: ez, club, stop: run / far };
+          }
+        }
       }
     }
     return best;
@@ -4446,7 +4522,7 @@ const Changes = [
     return 'Next: ' + (plan.swing < 1 ? swingName(plan.swing) + ' ' : '') + plan.club.name.toLowerCase() + ', ' +
       (plan.misread ? 'misread the hole, firing straight at the pin' : forPin ? 'going for the pin' : plan.layUp ? 'laying up' + (plan.wind ? ' out of the wind' : ' short of trouble') : 'playing up the hole') +
       ', ' + Math.round(plan.d) + ' out' +
-      (plan.spin > 0.05 ? ', ' + Math.round(plan.spin * 100) + '% backspin' : '') +
+      (plan.spin > 0.05 ? ', ' + Math.round(plan.spin * 100) + '% backspin' : plan.spin < -0.05 ? ', ' + Math.round(-plan.spin * 100) + '% topspin for more run' : '') +
       (plan.curve ? ', bending it ' + (plan.curve > 0 ? 'right' : 'left') : '') +
       (plan.low ? ', punched low under the branches' : '') +
       (plan.swing < 1 ? ', kept down out of the wind' : '') +
@@ -4492,9 +4568,15 @@ const Changes = [
       }
     } else {
       // landing prediction: misjudging the spin needed changes how far the ball runs
-      const dialled = (plan.spin > 0.05 || plan.curve) && Math.random() < stats.dialledIn;
-      spin = dialled ? plan.spin : plan.low ? 0 : Math.max(0, Math.min(stats.maxSpin * club.spin * swingSpin(plan.swing), plan.spin + gaussian() * stats.spinSigma));
-      d *= 1 + 0.3 * (plan.spin - spin);
+      const dialled = (Math.abs(plan.spin) > 0.05 || plan.curve) && Math.random() < stats.dialledIn;
+      if (plan.spin < 0) {
+        // topspin comes out as true as backspin does, and the ball runs as far as it got
+        spin = dialled ? plan.spin : Math.min(0, Math.max(-stats.maxSpin, plan.spin + gaussian() * stats.spinSigma));
+        d *= topRun(spin) / topRun(plan.spin);
+      } else {
+        spin = dialled ? plan.spin : plan.low ? 0 : Math.max(0, Math.min(stats.maxSpin * club.spin * swingSpin(plan.swing), plan.spin + gaussian() * stats.spinSigma));
+        d *= 1 + 0.3 * (plan.spin - spin);
+      }
       powerSigma *= 1 - 0.4 * spin;
       aimSigma *= swingAim(plan.swing);
 
@@ -4528,6 +4610,7 @@ const Changes = [
       earn('aimAccuracy', 1, 'shots played');
       earn('swingSpeed', 2, 'full swings');
       if (spin > 0.05) earn('grip', 1 + 2 * spin, 'backspin');
+      else if (spin < -0.05) earn('grip', 1 - 2 * spin, 'topspin');
     }
     if (lie) {
       holeEvents[lie] = true;
@@ -4748,7 +4831,14 @@ const Changes = [
         used.distance += covered;
         used.miss += Math.hypot(shot.x - ball.x, shot.z - ball.z);
       });
-      if (strokes === 1) recordFairway(!Course.groundAt(hole, ball.x, ball.z));
+      if (strokes === 1) {
+        const onFairway = !Course.groundAt(hole, ball.x, ball.z);
+        recordFairway(onFairway);
+        if (hole.par >= 4) {
+          teeShot.fairway = onFairway;
+          teeShot.drive = !treeHit && covered >= stats.maxDrive;
+        }
+      }
     }
     if (shot) {
       const ground = Course.groundAt(hole, ball.x, ball.z);
@@ -4852,7 +4942,8 @@ const Changes = [
     // sponsor pay, contract progress and fresh offers
     const career = Career.afterHole(save.career, {
       holed, strokes, par: hole.par, waterBalls, putts: holePutts, green: greenInReg,
-      clean: !holeEvents.sand && !holeEvents.water && !holeEvents.tree
+      clean: !holeEvents.sand && !holeEvents.water && !holeEvents.tree,
+      fairway: teeShot.fairway, drive: teeShot.drive
     }, careerTerms());
     save.coins += coins + career.coins - career.spent;
     save.totalCoins += coins + career.coins;
@@ -4988,6 +5079,7 @@ const Changes = [
     holeEvents = {};
     holePutts = 0;
     greenInReg = false;
+    teeShot = { fairway: false, drive: false };
     shot = null;
     lastResult = '';
     missed = null;
@@ -5775,11 +5867,19 @@ const Changes = [
     ctx.fill();
   }
 
+  // The flag is out of the hole while the golfer is putting, and back in once the ball has dropped.
+  function flagOut() {
+    return !!plan && plan.putt && phase !== 'holed';
+  }
+
   function drawFlag() {
-    // the flag is out of the hole while the golfer is putting, and back in once the ball has dropped
-    if (plan && plan.putt && phase !== 'holed') return;
+    if (flagOut()) return;
     const base = project(hole.cup.x, hole.cup.z, 0);
-    if (!base) return;
+    if (base) paintFlag(base);
+  }
+
+  // The flag on its pole, standing at a projected spot: in the hole, or in the caddie's hand.
+  function paintFlag(base) {
     const s = base.s;
     const top = base.y - 44 * s;
     ctx.fillStyle = PAL.white;
@@ -5943,6 +6043,7 @@ const Changes = [
   }
 
   // The caddie, once hired: the golfer's walking figure in white overalls, with the bag over one shoulder.
+  // They hold the flag while the golfer putts, and raise a fist at a birdie.
   function drawCaddie() {
     const spot = caddieSpot();
     const feet = project(spot.x, spot.z, 0);
@@ -5966,8 +6067,13 @@ const Changes = [
     part(13, 11, 2, 2, PAL.gold);
     part(13, 3, 1, 3, PAL.grey);
     part(14, 4, 1, 2, PAL.grey);
-    stamp((striding ? Sprites.POSES.walkLeft : Sprites.POSES.walkRight).rows, left, top, k, Sprites.CADDIE_INK);
+    // a birdie or better and the caddie's fist goes up with the golfer's
+    const pleased = phase === 'holed' && cheering && strokes < hole.par;
+    stamp((pleased ? Sprites.POSES.cheer : striding ? Sprites.POSES.walkLeft : Sprites.POSES.walkRight).rows, left, top, k, Sprites.CADDIE_INK);
     ctx.restore();
+    // while the golfer putts the caddie tends the flag, holding it at their other side. In the hole
+    // it is drawn large, to be seen from the tee; in the hand it is a little taller than the caddie
+    if (flagOut()) paintFlag({ x: feet.x - 5.5 * Sprites.UNIT * feet.s, y: feet.y, s: feet.s * 0.6 });
   }
 
   // The golfer's intent, drawn on the ground: aim line, the flight through the
@@ -6603,7 +6709,9 @@ const Changes = [
       ['No water ball', percent(form.dry)],
       ['Green in regulation', percent(form.green)],
       ['Two putts or fewer', percent(form.twoPutt)],
-      ['No sand, water or tree', percent(form.clean)]
+      ['No sand, water or tree', percent(form.clean)],
+      ['Fairway hit from the tee', percent(form.fairway)],
+      ['Drive of full distance', percent(form.drive)]
     ];
     el.form.textContent = '';
     el.form.appendChild(make('p', 'muted', 'How recent holes have gone. Each new hole counts for ' + percent(FORM_MEMORY) + ' and older ones fade.'));
@@ -6790,7 +6898,7 @@ const Changes = [
     // whether auto-accept haggles, which it does without being seen to
     const chance = Math.round(stats.haggle * 100);
     el.autoNote.textContent = stats.haggle >= Career.HAGGLE_AUTO
-      ? 'Auto-accept haggles over every contract and sponsor it takes, as it takes them (a ' + chance + '% chance of talking each one up). The contract or deal says how it went.'
+      ? 'Auto-accept haggles over every contract it could take before choosing the best of them, and over every sponsor offer (a ' + chance + '% chance of talking each one up). The contract or deal says how it went.'
       : 'Auto-accept does not haggle yet: at a ' + chance + '% chance it would lose more than it won. It starts at ' + Math.round(Career.HAGGLE_AUTO * 100) +
         '%, which comes at Negotiation level ' + (save.attrs.negotiation.level + Math.ceil((Career.HAGGLE_AUTO - stats.haggle) / 0.02 - 1e-9)) + '.';
     el.autoNote.textContent += ' It lets a contract that is running late go when a much better one is on offer.';
@@ -7447,6 +7555,9 @@ const Changes = [
     const url = FEEDBACK_URL + '?title=' + encodeURIComponent('Feedback: ') + '&body=' + encodeURIComponent(feedbackBody());
     if (window.open) window.open(url, '_blank', 'noopener');
   });
+  el.myReports.addEventListener('click', () => {
+    if (window.open) window.open(MY_REPORTS_URL, '_blank', 'noopener');
+  });
 
   el.exportSave.addEventListener('click', () => {
     writeSave();
@@ -7795,7 +7906,17 @@ const Changes = [
     for (const entry of entries) {
       el.newsList.appendChild(make('p', 'label', entry.date));
       const list = make('ul', '');
-      for (const item of entry.items) list.appendChild(make('li', '', item));
+      for (const item of entry.items) {
+        const line = make('li', '', item.text || item);
+        if (item.issue) {
+          const link = make('a', 'report', 'Answers report #' + item.issue);
+          link.href = REPORT_URL + item.issue;
+          link.target = '_blank';
+          link.rel = 'noopener';
+          line.appendChild(link);
+        }
+        list.appendChild(line);
+      }
       el.newsList.appendChild(list);
     }
     el.news.hidden = false;
