@@ -707,6 +707,56 @@ footer {
   margin-top: 16px;
 }
 
+/* What's new: a box held up over the page until it is put away */
+.news {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.7);
+}
+
+.news[hidden] {
+  display: none;
+}
+
+.news-box {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  max-width: 640px;
+  max-height: 100%;
+  padding: 14px 16px;
+  border: 1px solid #f8b800;
+  background: #000000;
+}
+
+.news-box h3 {
+  margin: 0;
+}
+
+.news-list {
+  overflow-y: auto;
+  font-size: 18px;
+}
+
+.news-list ul {
+  margin: 4px 0 10px;
+  padding-left: 20px;
+}
+
+.news-list li {
+  margin-bottom: 6px;
+}
+
+.news-box .action {
+  align-self: flex-end;
+}
+
 /* which build of the game this is, at the start of the row of buttons */
 .build {
   margin-right: auto;
@@ -766,7 +816,7 @@ h3,
       <header class="hud">
         <h1>Idle Golf</h1>
         <div class="stat"><span class="label">Coins</span><span id="coins">0</span></div>
-        <div class="stat"><span class="label">Hole</span><span id="hole">1</span></div>
+        <div class="stat"><span class="label" id="hole-label">Hole</span><span id="hole">1</span></div>
         <div class="stat"><span class="label">Par</span><span id="par">4</span></div>
         <div class="stat"><span class="label">Difficulty</span><span id="difficulty">0%</span></div>
         <div class="stat"><span class="label">Strokes</span><span id="strokes">0</span></div>
@@ -871,6 +921,7 @@ h3,
       <section class="panel" data-panel="equipment" hidden>
         <label class="toggle"><input type="checkbox" id="auto-gear"> Auto-buy upgrades as I can afford them</label>
         <label class="toggle">Auto-buy gets first <select id="auto-gear-first"></select></label>
+        <label class="toggle"><input type="checkbox" id="auto-academy"> Auto-buy funds junior academies too</label>
         <div id="gear-list" class="gear-list"></div>
         <div class="card">
           <h3>The bag</h3>
@@ -908,6 +959,7 @@ h3,
 
       <footer>
         <span id="build" class="build"></span>
+        <button id="whats-new" class="action" type="button">What's new</button>
         <button id="feedback" class="action" type="button">Send feedback</button>
         <button id="export-save" class="action" type="button">Export save</button>
         <button id="import-save" class="action" type="button">Import save</button>
@@ -918,6 +970,36 @@ h3,
     </div>
   </main>
 
+  <!-- what has changed since the player last looked; held up over the page once after an update -->
+  <div id="news" class="news" hidden>
+    <div class="news-box" role="dialog" aria-labelledby="news-title">
+      <h3 id="news-title">What's new</h3>
+      <div id="news-list" class="news-list"></div>
+      <button id="news-close" class="action" type="button">OK</button>
+    </div>
+  </div>
+
+  <script>
+// What has changed in each build shared with testers, newest first: the game
+// holds this up once when a newer build is first opened, and the "What's new"
+// button at the foot of the page shows all of it. Add an entry at the top,
+// with the next id, every time a build is published; write for the player
+// (what they will see), and say where a change answers a report.
+const Changes = [
+  {
+    id: 1,
+    date: '2026-10-11',
+    items: [
+      "This list. It opens once after each update, and \"What's new\" at the foot of the page brings it back.",
+      'Shorter swings: in a wind the golfer may take more club and swing it three-quarter or half, to keep the ball down. The plan line and the map name the swing, and the Stats tab counts them.',
+      "In a tournament the header gives the hole's number on the course (\"5/9\") with the career's hole number in small print above it, and the course view letters the hole and its par across the sky.",
+      "Signature holes: a birdie or better on a course's signature hole in a tournament pays the hole double, and your best score on each is kept on the Career and Stats tabs.",
+      'A new switch on the Equipment tab, "Auto-buy funds junior academies too", for legacy points late in a career without buying them by hand.',
+      'Auto-accept now lets a contract that is running late go when a much better one is on offer, instead of waiting it out at half pay.'
+    ]
+  }
+];
+</script>
   <script>
 // Player attributes. Four main attributes, each made of three sub-attributes
 // that level up from experience earned by what the golfer does during a hole.
@@ -1195,6 +1277,7 @@ h3,
     { id: 'mind', name: 'Mind coach', sub: 'composure', boosts: 'Composure' }
   ];
   const STAFF_COSTS = [3000000, 6000000, 12000000, 24000000, 48000000];
+  const ACADEMY_COST = 700000;   // coins to fund a career's first junior academy; each one after costs twice the last
   // What auto-buy can be told to get first: the cheapest upgrade going, the
   // clubs, everything that is not a club, or any one piece.
   const GEAR_FIRST = [
@@ -1293,6 +1376,9 @@ h3,
   // of its reward. A score over nine that is missed is tried again over the
   // next nine, on the same terms.
   const LATE_PAY = 0.5;
+  // Auto-accept lets a late contract go when an offer is expected to pay
+  // this many times as much for each hole as the late one still would.
+  const LATE_DROP = 1.5;
   const TARGET_CAP = 30;         // most holes a contract will ask for
   const FORM_FLOOR = 0.12;       // contracts needing something rarer than this are not offered
   const DEADLINE_CAP = 45;
@@ -1391,7 +1477,7 @@ h3,
     const staff = {};
     for (const hire of STAFF) staff[hire.id] = 0;
     return {
-      gear, staff, contract: null, offers: [], sponsor: null, sponsor2: null, sponsorOffer: null, nextSponsorIn: 4, auto: false, autoRisk: 'long', autoGear: false, autoGearFirst: 'cheapest',
+      gear, staff, contract: null, offers: [], sponsor: null, sponsor2: null, sponsorOffer: null, nextSponsorIn: 4, auto: false, autoRisk: 'long', autoGear: false, autoGearFirst: 'cheapest', autoAcademy: false,
       tournament: null, tour: freshTour(), form: freshForm(), season: freshSeason(1, 0),
       caddie: 0,                 // 0 for no caddie, 1 once hired, then one more for each improvement
       bench: [],                 // names of clubs the player has left out of the bag
@@ -1469,6 +1555,7 @@ h3,
     if (Number.isFinite(raw.nextSponsorIn)) c.nextSponsorIn = raw.nextSponsorIn;
     c.auto = raw.auto === true;
     c.autoGear = raw.autoGear === true;
+    c.autoAcademy = raw.autoAcademy === true;
     if (GEAR_FIRST.some(first => first.id === raw.autoGearFirst)) c.autoGearFirst = raw.autoGearFirst;
     if (AUTO_RISKS.some(risk => risk.id === raw.autoRisk)) c.autoRisk = raw.autoRisk;
     if (raw.form && typeof raw.form === 'object') {
@@ -1611,6 +1698,11 @@ h3,
       ': +' + career.staff[hire.id] + ' ' + hire.boosts;
   }
 
+  // What the next junior academy costs: somewhere for coins to go once there is nothing left to buy.
+  function academyCost(career) {
+    return ACADEMY_COST * Math.pow(2, career.academy);
+  }
+
   // Whether auto-buy has been told to get this piece of equipment first.
   function putFirst(career, g) {
     const first = career.autoGearFirst;
@@ -1623,7 +1715,8 @@ h3,
   // are kept a tier ahead of the rest, and the coins are saved for them when
   // it is their turn. The caddie is bought in the same way whenever they
   // cost no more than the equipment next in line, and so are the staff, the
-  // cheapest of them first.
+  // cheapest of them first. With its switch on, a junior academy is funded
+  // too, whenever it costs no more than anything else there is to buy.
   // Returns the coins spent and a note for each purchase.
   function autoBuy(career, coins, discount) {
     const out = { spent: 0, notes: [] };
@@ -1636,16 +1729,24 @@ h3,
         if (!pick || turn < pick.turn || (turn === pick.turn && cost < pick.cost)) pick = { g, cost, turn };
       }
       const caddie = caddieCost(career, discount);
+      let hire = null;
+      for (const one of STAFF) {
+        const cost = staffCost(career, one.id, discount);
+        if (cost !== null && (!hire || cost < hire.cost)) hire = { one, cost };
+      }
+      const academy = academyCost(career);
+      if (career.autoAcademy && (!pick || academy <= pick.cost) && (caddie === null || academy <= caddie) && (!hire || academy <= hire.cost)) {
+        if (academy > coins - out.spent) return out;
+        career.academy++;
+        out.spent += academy;
+        out.notes.push('Funded a junior academy -' + academy.toLocaleString());
+        continue;
+      }
       if (caddie !== null && (!pick || caddie <= pick.cost)) {
         if (caddie > coins - out.spent) return out;
         out.spent += buyCaddie(career, coins - out.spent, discount);
         out.notes.push((career.caddie === 1 ? 'Hired a caddie' : 'Caddie improved to +' + Math.round(caddieBonus(career) * 100) + '%') + ' -' + caddie.toLocaleString());
         continue;
-      }
-      let hire = null;
-      for (const one of STAFF) {
-        const cost = staffCost(career, one.id, discount);
-        if (cost !== null && (!hire || cost < hire.cost)) hire = { one, cost };
       }
       if (hire && (!pick || hire.cost <= pick.cost)) {
         if (hire.cost > coins - out.spent) return out;
@@ -1858,6 +1959,20 @@ h3,
     return c.reward * (Number.isFinite(c.odds) ? c.odds : 1) / (c.holesLeft === null ? c.target : c.holesLeft);
   }
 
+  // What a contract running late is expected to pay per hole from here: its
+  // (reduced) reward over the holes the golfer's form says it still needs.
+  function lateRate(c, form) {
+    const t = CONTRACT_TYPES[c.type];
+    if (t.round) {
+      // each try at the score takes `target` holes and comes off as often as form says
+      const spread = Math.sqrt(c.target * Math.max(0.3, form.spread));
+      const chance = Math.max(0.02, normalBelow((c.limit + 0.5 - c.target * form.score) / spread));
+      return c.reward * chance / c.target;
+    }
+    const rate = t.form ? Math.max(0.02, Math.min(0.98, form[t.form])) : 1;
+    return c.reward * rate / Math.max(1, c.target - c.progress);
+  }
+
   // What a sponsor deal is worth for each hole played, going by how often the golfer's form says it will pay.
   // Every deal pays its full number of times in the end, so this is what tells one from another.
   function sponsorRate(s, form) {
@@ -1885,11 +2000,17 @@ h3,
       if (won) out.xp += 3;
       out.notes.push(won ? 'Haggled ' + what + ' up' : 'Haggling over ' + what + ' backfired');
     };
+    let best = -1;
+    career.offers.forEach((offer, i) => {
+      if (autoAllows(career, offer) && (best < 0 || contractRate(offer) > contractRate(career.offers[best]))) best = i;
+    });
+    // a contract running late holds up the next one: it is let go when an offer is worth that much more a hole
+    const running = career.contract;
+    if (running && running.late && best >= 0 && contractRate(career.offers[best]) >= LATE_DROP * lateRate(running, career.form)) {
+      dropContract(career);
+      out.notes.push('Let a late contract go for a better one');
+    }
     if (!career.contract) {
-      let best = -1;
-      career.offers.forEach((offer, i) => {
-        if (autoAllows(career, offer) && (best < 0 || contractRate(offer) > contractRate(career.offers[best]))) best = i;
-      });
       if (best >= 0) {
         talk(career.offers[best], 'a contract');
         acceptContract(career, best);
@@ -2207,7 +2328,7 @@ h3,
 
   window.Career = {
     GEAR, TIERS, fresh, sanitize,
-    gearBonus, clubBonus, gearEffect, nextTier, gearCost, buyGear, autoBuy, GEAR_FIRST, CADDIE_COSTS, caddieBonus, caddieCost, buyCaddie, STAFF, STAFF_COSTS, staffCost, buyStaff, staffNote,
+    gearBonus, clubBonus, gearEffect, nextTier, gearCost, buyGear, autoBuy, GEAR_FIRST, CADDIE_COSTS, caddieBonus, caddieCost, buyCaddie, STAFF, STAFF_COSTS, staffCost, buyStaff, staffNote, academyCost,
     AUTO_RISKS, fillOffers, contractText, stakeName, acceptContract, dropContract, haggle, HAGGLE_AUTO,
     sponsorTerms, sponsorHoles, sponsorSlot, sponsorRate, LATE_PAY, fameMult, FAME_MAX, acceptSponsor, declineSponsor, autoPick,
     TOURS, TOUR_HOLES, TOUR_PRIZES, MAJOR, tournamentFee, enterTournament, tourHole, standings, rivalStyle, SEASON_LENGTH, SEASON_PRIZES, seasonTable, ordinal, underPressure, autoTier, placeText, theName,
@@ -2927,7 +3048,7 @@ h3,
   const MIGRATIONS = {};
   // Which build this is. tools/single-file.js writes the date and commit in
   // here when it builds the game for sharing; run from the project it stays 'dev'.
-  const BUILD = "2026-10-11 (47dda2a)";
+  const BUILD = "2026-10-11 (a364460)";
   // Where the newest shared build says which build it is, and where it can be
   // played or downloaded. A shared copy looks there now and then to see
   // whether it has been overtaken; nothing is sent.
@@ -2961,7 +3082,6 @@ h3,
   const MOMENTUM_MAX = 5;        // and as hot
   const LEGACY_LEVELS = 8;       // sub-attribute levels gained per legacy point on retiring
   const TOUR_TIP_HOLES = 18;     // holes played before a player who has never entered a tournament is told about them
-  const ACADEMY_COST = 700000;   // coins to fund this career's first junior academy; each one after costs twice the last
   const LEGACY_XP = 0.03;        // experience bonus per effective legacy point
   const LEGACY_COINS = 0.02;     // income bonus per effective legacy point
   const LEGACY_FULL = 30;        // lifetime points that count in full; beyond this the bonus tapers
@@ -2980,6 +3100,14 @@ h3,
   const PUNCH_CARRY = 0.45;      // share of the club's usual time in the air
   const PUNCH_PEAK = 8;          // highest a punch flies
   const PUNCH_COST = 4;          // what the planner gives up, in units from the cup, to play a full shot instead
+  // A shorter swing with more club: three-quarter or half. The ball flies
+  // lower and runs further, so the wind has less to push on, and a short
+  // swing is a little straighter; but there is less backspin to be had, and
+  // the longer club is the less accurate one. It is weighed in a wind only.
+  const SWINGS = [0.75, 0.5];    // shares of a club's distance
+  const SWING_THIN = 0.9;        // a shorter swing is only played if it also stays dry at this share of its distance
+  const SIGNATURE_PAY = 2;       // a birdie or better on a course's signature hole, in a tournament, pays the hole this many times over
+  const SWING_COST = 2;          // what the planner gives up, in units from the cup, to play a full shot instead
   const BREAK = 45;              // pull on a ball rolling across a green at full slope, units/s^2
   // The bag, longest first. reach is a share of the golfer's longest shot;
   // carry is added to the share of a shot spent in the air; apex scales its
@@ -3179,12 +3307,17 @@ h3,
   const el = {
     coins: document.getElementById('coins'),
     hole: document.getElementById('hole'),
+    holeLabel: document.getElementById('hole-label'),
     par: document.getElementById('par'),
     difficulty: document.getElementById('difficulty'),
     form: document.getElementById('form-box'),
     exportSave: document.getElementById('export-save'),
     feedback: document.getElementById('feedback'),
     build: document.getElementById('build'),
+    news: document.getElementById('news'),
+    newsList: document.getElementById('news-list'),
+    newsClose: document.getElementById('news-close'),
+    whatsNew: document.getElementById('whats-new'),
     restoreSave: document.getElementById('restore-save'),
     statsBox: document.getElementById('stats-box'),
     volume: document.getElementById('volume'),
@@ -3220,6 +3353,7 @@ h3,
     autoEnter: document.getElementById('auto-enter'),
     autoGear: document.getElementById('auto-gear'),
     autoGearFirst: document.getElementById('auto-gear-first'),
+    autoAcademy: document.getElementById('auto-academy'),
     bag: document.getElementById('bag-list'),
     settings: document.getElementById('settings'),
     away: document.getElementById('away'),
@@ -3234,6 +3368,12 @@ h3,
     tabs: document.getElementById('tabs')
   };
 
+  let returning = false;         // true if a game was already saved here when the page opened
+  try {
+    returning = localStorage.getItem(SAVE_KEY) !== null;
+  } catch (e) {
+    // storage unavailable: treated as a first visit
+  }
   let save = loadSave();
   // a career begun before purchases were given at once is brought up to what its shop has bought
   // (all but Seed money, which cannot be told from coins since spent)
@@ -3305,10 +3445,12 @@ h3,
   // played against them and how many of those the player finished ahead in.
   // courseRecords is the player's best nine against par in a tournament on
   // each tier's course, over every career, or null where none has been finished.
+  // signatureBest is the fewest strokes taken on each course's signature hole
+  // in a tournament, likewise.
   function freshLegacy() {
     const shop = {};
     for (const item of SHOP) shop[item.id] = 0;
-    return { points: 0, total: 0, retirements: 0, shop, history: [], trophies: Career.TOURS.map(() => 0), courseRecords: Career.TOURS.map(() => null), played: 0, seasons: 0, rivals: {} };
+    return { points: 0, total: 0, retirements: 0, shop, history: [], trophies: Career.TOURS.map(() => 0), courseRecords: Career.TOURS.map(() => null), signatureBest: Career.TOURS.map(() => null), played: 0, seasons: 0, rivals: {} };
   }
 
   // Lifetime points count in full up to LEGACY_FULL and taper after that.
@@ -3333,7 +3475,7 @@ h3,
   function freshRecords() {
     return {
       holes: 0, strokesToPar: 0, putts: 0, eagles: 0, birdies: 0, pars: 0, bogeys: 0, doubles: 0, worse: 0, pickUps: 0,
-      longestShot: 0, longestPutt: 0, fairwayTries: 0, fairwaysHit: 0, waterBalls: 0, treesHit: 0, punches: 0, bestNine: null,
+      longestShot: 0, longestPutt: 0, fairwayTries: 0, fairwaysHit: 0, waterBalls: 0, treesHit: 0, punches: 0, shortSwings: 0, bestNine: null,
       puttsTried: 0, puttsHoled: 0, greenTries: 0, greens: 0, sandHoles: 0, sandSaves: 0, clubs: freshClubRecords()
     };
   }
@@ -3420,6 +3562,9 @@ h3,
           }
           if (Array.isArray(raw.legacy.courseRecords)) {
             s.legacy.courseRecords = Career.TOURS.map((tour, i) => (Number.isSafeInteger(raw.legacy.courseRecords[i]) ? raw.legacy.courseRecords[i] : null));
+          }
+          if (Array.isArray(raw.legacy.signatureBest)) {
+            s.legacy.signatureBest = Career.TOURS.map((tour, i) => (Number.isSafeInteger(raw.legacy.signatureBest[i]) && raw.legacy.signatureBest[i] >= 1 ? raw.legacy.signatureBest[i] : null));
           }
           // likewise the count of tournaments played, which was kept for the career alone
           s.legacy.played = Number.isFinite(raw.legacy.played) && raw.legacy.played >= 0 ? Math.floor(raw.legacy.played) : s.career.tour.played;
@@ -3661,14 +3806,23 @@ h3,
     return base + (Math.max(SPIN_CARRY, base) - base) * spin;
   }
 
-  // The same for a shot played as a punch (low) or not.
-  function shotCarry(spin, club, low) {
-    return carryFraction(spin, club) * (low ? PUNCH_CARRY : 1);
+  // The same for a shot played as a punch (low) or not, with a swing of any size.
+  function shotCarry(spin, club, low, swing = 1) {
+    return carryFraction(spin, club) * (low ? PUNCH_CARRY : 1) * (0.6 + 0.4 * swing);
+  }
+
+  // What a swing's size leaves of the backspin a club can put on, and of its aim error.
+  function swingSpin(swing) {
+    return swing * swing;
+  }
+
+  function swingAim(swing) {
+    return 0.7 + 0.3 * swing;
   }
 
   // How high a shot that carries `carry` gets.
-  function shotPeak(carry, club, low) {
-    const peak = carry * stats.apex * club.apex * (stats.knockdown && hole.wind.speed >= KNOCKDOWN_WIND ? KNOCKDOWN : 1);
+  function shotPeak(carry, club, low, swing = 1) {
+    const peak = carry * stats.apex * club.apex * swing * swing * (stats.knockdown && hole.wind.speed >= KNOCKDOWN_WIND ? KNOCKDOWN : 1);
     return low ? Math.min(peak, PUNCH_PEAK) : peak;
   }
 
@@ -3727,6 +3881,15 @@ h3,
       }
     }
     return signatures[tier];
+  }
+
+  // A course's signature hole for the Career tab: which it is, what it pays, and the player's best score on it if it has been played.
+  function signatureText(tier) {
+    const index = signatureHole(tier);
+    const best = save.legacy.signatureBest[tier];
+    const par = Course.generate(0, Career.tourHole(tier, index)).par;
+    return 'Signature hole: the ' + Career.ordinal(index + 1) + ', ' + Career.TOURS[tier].signature + ', where a birdie or better pays ' + (SIGNATURE_PAY === 2 ? 'double' : SIGNATURE_PAY + ' times over') + '.' +
+      (best === null ? '' : ' Your best there: ' + best + ' (' + toPar(best - par) + ').');
   }
 
   // How much tiredness adds to every shot's error on the hole being played, as a share: 0 when fresh.
@@ -3807,9 +3970,9 @@ h3,
   // (with a bit of overshoot) stays in bounds, out of the water and off the
   // trunks. Backspin shortens the roll. A ball below the branches can only
   // hit a trunk, which is how a punch (low) gets past a tree.
-  function shotTrouble(h0, d, spin, curve, margin, club, low) {
-    const carry = d * shotCarry(spin, club, low);
-    const peak = shotPeak(carry, club, low);
+  function shotTrouble(h0, d, spin, curve, margin, club, low, swing) {
+    const carry = d * shotCarry(spin, club, low, swing);
+    const peak = shotPeak(carry, club, low, swing);
     // This runs for every shot the planner weighs, and most of those are
     // straight, so a straight shot's path is worked out here from its heading
     // (the same sums as pathPoint, without the trigonometry at every step).
@@ -3959,6 +4122,38 @@ h3,
       }
     }
     if (!best) return instinct;
+    // In a wind, a straight shot is weighed again with more club and a shorter
+    // swing: what it stands to miss by (the wind the golfer does not read,
+    // and their aim) against where it would finish.
+    if (hole.wind.speed >= 3 && !best.low && !best.curve) {
+      const unread = (stats.weatherEye && strokes === 0 ? 0 : 1 - stats.windRead) * (hole.wind.gusty ? 1 + GUST : 1);
+      const atPin = Math.hypot(hole.cup.x - best.tx, hole.cup.z - best.tz) < 1;
+      const miss = (club, spin, swing) => {
+        const share = shotCarry(spin, club, false, swing);
+        const blown = WIND_DRIFT * hole.wind.speed * windTime(best.d, share, shotPeak(best.d * share, club, false, swing)) * unread;
+        return blown + best.d * baseError(club).aim * swingAim(swing);
+      };
+      let least = best.score + miss(best.club, best.spin, 1);
+      const full = best;
+      for (const swing of SWINGS) {
+        const club = pickClub(full.d / swing, lie);
+        if (clubReach(club, lie) * swing < full.d) continue;
+        const spin = Math.min(full.spin, stats.maxSpin * club.spin * swingSpin(swing));
+        const carry = full.d * shotCarry(spin, club, false, swing);
+        const run = carry + rollOut(ball.x + Math.sin(full.heading) * carry, ball.z + Math.cos(full.heading) * carry, full.heading, full.d - carry);
+        const fx = ball.x + Math.sin(full.heading) * run;
+        const fz = ball.z + Math.cos(full.heading) * run;
+        let score = Math.hypot(hole.cup.x - fx, hole.cup.z - fz) + (atPin ? -5 * spin : 3 * spin) + SWING_COST;
+        if (Course.hazardAt(hole, fx, fz, 6) === 'sand') score += SAND_COST;
+        else if (Course.inRough(hole, fx, fz)) score += ROUGH_COST;
+        const all = score + miss(club, spin, swing);
+        if (all >= least || shotTrouble(full.heading, full.d, spin, 0, stats.waterMargin, club, false, swing)) continue;
+        // it comes down sooner and runs further, so one caught a little thin must stay dry as well
+        if (shotTrouble(full.heading, full.d * SWING_THIN, spin, 0, stats.waterMargin, club, false, swing) === 'ground') continue;
+        least = all;
+        best = { heading: full.heading, d: full.d, spin, curve: 0, score, tx: full.tx, tz: full.tz, club, stop: run / full.d, swing };
+      }
+    }
     best.avoided = !!shotTrouble(instinct.heading, instinct.d, instinct.spin, 0, 0, instinct.club);
     return best;
   }
@@ -3980,7 +4175,7 @@ h3,
     let scale = plan.putt && stats.steadyHands && momentum < 0 ? 1 : momentumError();
     scale *= nervesError() * (1 + fatigue());
     if (plan.lie) scale *= lieError(plan.lie, plan.club);
-    return { aim: error.aim * scale, power: error.power * scale * (plan.putt ? 1 : 1 - 0.4 * plan.spin) };
+    return { aim: error.aim * scale * (plan.putt ? 1 : swingAim(plan.swing)), power: error.power * scale * (plan.putt ? 1 : 1 - 0.4 * plan.spin) };
   }
 
   // Where a putt struck on heading h0 to run d actually goes: the green's
@@ -4043,6 +4238,7 @@ h3,
       heading: aimHeading, d: dist + 3, spin: 0,
       avoided: false, misread: false, wind: false,
       low: false,                       // a punch, kept under the branches
+      swing: 1,                         // the size of the swing: 0.75 or 0.5 when more club is taken and swung shorter
       from: { x: ball.x, z: ball.z },
       x: hole.cup.x, z: hole.cup.z,     // where the ball is meant to finish
       curve: 0,                         // total turn in flight; positive bends right
@@ -4066,8 +4262,10 @@ h3,
     } else {
       const p = planShot(dist, aimHeading, lie);
       const low = !!p.low;
-      let carryShare = shotCarry(p.spin, p.club, low);
+      const swing = p.swing || 1;
+      let carryShare = shotCarry(p.spin, p.club, low, swing);
       plan.low = low;
+      plan.swing = swing;
       plan.spin = p.spin;
       plan.curve = p.curve;
       plan.avoided = p.avoided;
@@ -4092,7 +4290,7 @@ h3,
       // Aiming off changes how far the shot has to go, which can call for
       // another club and changes how long the wind has to work on it, so the
       // sum is done twice: once for the shot as planned, once for the shot it became.
-      const longest = clubReach(pickClub(Infinity, lie, low), lie, low);
+      const longest = clubReach(pickClub(Infinity, lie, low), lie, low) * swing;
       let push = 0;
       let ax = plan.x;
       let az = plan.z;
@@ -4100,16 +4298,16 @@ h3,
       plan.d = p.d;
       plan.club = p.club;
       for (let pass = 0; pass < 2; pass++) {
-        carryShare = shotCarry(p.spin, plan.club, low);
-        push = WIND_DRIFT * windTime(plan.d, carryShare, shotPeak(plan.d * carryShare, plan.club, low)) * plan.read * sensed;
+        carryShare = shotCarry(p.spin, plan.club, low, swing);
+        push = WIND_DRIFT * windTime(plan.d, carryShare, shotPeak(plan.d * carryShare, plan.club, low, swing)) * plan.read * sensed;
         ax = plan.x - felt.x * push;
         az = plan.z - felt.z * push;
         bent = curveOffset(carryShare, p.curve);
         plan.d = Math.min(Math.hypot(ax - ball.x, az - ball.z) / bent.ratio, longest);
-        plan.club = pickClub(plan.d, lie, low);
+        plan.club = pickClub(plan.d / swing, lie, low);
       }
       plan.heading = Math.atan2(ax - ball.x, az - ball.z) - bent.angle;
-      carryShare = shotCarry(p.spin, plan.club, low);
+      carryShare = shotCarry(p.spin, plan.club, low, swing);
 
       // the expected track over the ground, for drawing
       const carry = plan.d * carryShare;
@@ -4131,11 +4329,15 @@ h3,
       plan.flight = [];
       for (let i = 0; i <= 14; i++) {
         const point = track(carry * i / 14);
-        point.h = Math.sin(Math.PI * i / 14) * shotPeak(carry, plan.club, low);
+        point.h = Math.sin(Math.PI * i / 14) * shotPeak(carry, plan.club, low, swing);
         plan.flight.push(point);
       }
     }
     showPlan();
+  }
+
+  function swingName(swing) {
+    return swing === 0.5 ? 'half' : 'three-quarter';
   }
 
   function planText() {
@@ -4146,12 +4348,13 @@ h3,
         (hole.slope.tilt * plan.dist > 4 ? ', allowing for ' + Math.round(stats.breakRead * 100) + '% of the break' : '') + '.';
     }
     const forPin = Math.hypot(hole.cup.x - plan.x, hole.cup.z - plan.z) < 1;
-    return 'Next: ' + plan.club.name.toLowerCase() + ', ' +
+    return 'Next: ' + (plan.swing < 1 ? swingName(plan.swing) + ' ' : '') + plan.club.name.toLowerCase() + ', ' +
       (plan.misread ? 'misread the hole, firing straight at the pin' : forPin ? 'going for the pin' : 'playing up the hole') +
       ', ' + Math.round(plan.d) + ' out' +
       (plan.spin > 0.05 ? ', ' + Math.round(plan.spin * 100) + '% backspin' : '') +
       (plan.curve ? ', bending it ' + (plan.curve > 0 ? 'right' : 'left') : '') +
       (plan.low ? ', punched low under the branches' : '') +
+      (plan.swing < 1 ? ', kept down out of the wind' : '') +
       (plan.avoided ? ', routed around trouble' : '') +
       (plan.lie ? ', from ' + plan.lie : '') +
       (plan.wind ? ', allowing for ' + (plan.read === 1 ? 'all' : Math.round(plan.read * 100) + '%') + ' of the wind' + (hole.wind.gusty && hole.wind.shifty ? ', which is gusting and shifting' : hole.wind.gusty ? ', which is gusting' : hole.wind.shifty ? ', which is shifting' : '') : '') + '.';
@@ -4195,9 +4398,10 @@ h3,
     } else {
       // landing prediction: misjudging the spin needed changes how far the ball runs
       const dialled = (plan.spin > 0.05 || plan.curve) && Math.random() < stats.dialledIn;
-      spin = dialled ? plan.spin : plan.low ? 0 : Math.max(0, Math.min(stats.maxSpin * club.spin, plan.spin + gaussian() * stats.spinSigma));
+      spin = dialled ? plan.spin : plan.low ? 0 : Math.max(0, Math.min(stats.maxSpin * club.spin * swingSpin(plan.swing), plan.spin + gaussian() * stats.spinSigma));
       d *= 1 + 0.3 * (plan.spin - spin);
       powerSigma *= 1 - 0.4 * spin;
+      aimSigma *= swingAim(plan.swing);
 
       if (plan.curve) {
         // the bend is judged like spin: Landing prediction decides how true it comes out
@@ -4222,6 +4426,7 @@ h3,
         earn('recovery', 2, 'punch shots');
         tally(r => { r.punches++; });
       }
+      if (plan.swing < 1) tally(r => { r.shortSwings++; });
       if (plan.avoided) earn('shotCalc', 3, 'routing around trouble');
       else earn('shotCalc', 1, 'shots planned');
       earn('landingPrediction', 1, 'full shots');
@@ -4280,8 +4485,8 @@ h3,
     ball.vx = Math.sin(heading) * speed;
     ball.vz = Math.cos(heading) * speed;
     ball.travelled = 0;
-    ball.carry = putt ? 0 : d * shotCarry(spin, club, plan.low);
-    ball.apex = putt ? 0 : shotPeak(ball.carry, club, plan.low) / ball.carry;   // peak height as a share of the carry
+    ball.carry = putt ? 0 : d * shotCarry(spin, club, plan.low, plan.swing);
+    ball.apex = putt ? 0 : shotPeak(ball.carry, club, plan.low, plan.swing) / ball.carry;   // peak height as a share of the carry
     ball.curve = curve;
     // the wind this shot really flies in: as strong as its gust, and swung round by its shift
     const blowing = putt ? { x: 0, z: 0 } : turned(hole.wind, plan.shift);
@@ -4295,7 +4500,7 @@ h3,
     playSound(putt ? 'putt' : 'swing');
     if (lie === 'sand') burst(lastPos.x, lastPos.z, 2, '#f8d878', 10, 26, 34);
     else if (!putt) burst(lastPos.x, lastPos.z, 1, '#58d854', 4, 16, 20);
-    say(putt ? 'Putting…' : lie === 'sand' ? 'Splashing out of the sand…' : lie === 'rough' ? 'Hacking out of the rough…' : plan.low ? 'Punching it low…' : strokes === 1 ? 'Tee shot…' : 'Approach shot…');
+    say(putt ? 'Putting…' : lie === 'sand' ? 'Splashing out of the sand…' : lie === 'rough' ? 'Hacking out of the rough…' : plan.low ? 'Punching it low…' : plan.swing < 1 ? 'Keeping it down with a ' + swingName(plan.swing) + ' swing…' : strokes === 1 ? 'Tee shot…' : 'Approach shot…');
     updateHud();
   }
 
@@ -4525,7 +4730,11 @@ h3,
   function finishHole(holed) {
     const mult = holed ? scoreMultiplier(strokes, hole.par) : 0.2;
     const fee = Math.random() < stats.appearanceFee;
-    const coins = Math.max(1, Math.round(holeBaseCoins(hole.number) * mult * stats.coinMult * (1 + Career.caddieBonus(save.career)))) * (fee ? stats.feeMult : 1);
+    // a tournament's signature hole (a play-off's holes are extra, and are not it)
+    const entered = tournamentInPlay();
+    const signature = !!(hole.course && entered && !entered.playoff && hole.course.index === signatureHole(hole.course.tier));
+    const bonus = signature && holed && strokes < hole.par;
+    const coins = Math.max(1, Math.round(holeBaseCoins(hole.number) * mult * stats.coinMult * (1 + Career.caddieBonus(save.career)))) * (fee ? stats.feeMult : 1) * (bonus ? SIGNATURE_PAY : 1);
     const label = holed ? scoreName(strokes, hole.par) : 'Picked up';
 
     save.holesPlayed++;
@@ -4620,6 +4829,11 @@ h3,
     }
     const extras = [];
     if (fee) extras.push('Appearance fee');
+    if (bonus) extras.push(Career.TOURS[hole.course.tier].signature + ' bonus');
+    if (signature && holed && (save.legacy.signatureBest[hole.course.tier] === null || strokes < save.legacy.signatureBest[hole.course.tier])) {
+      save.legacy.signatureBest[hole.course.tier] = strokes;
+      logMoment('Best at ' + Career.TOURS[hole.course.tier].signature + ': ' + strokes + ' (' + toPar(strokes - hole.par) + ')', '#f8b800');
+    }
     if (breakthrough) extras.push('Breakthrough');
 
     const perksBefore = Attributes.GROUPS.map(group => Attributes.perks(save.attrs, group).map(perk => perk.unlocked));
@@ -4654,6 +4868,7 @@ h3,
       ? 'Hole ' + hole.number + ': ' + label + ' (' + strokes + ' strokes), +' + coins + ' coins.'
       : 'Hole ' + hole.number + ': picked up after ' + MAX_STROKES + ' strokes, +' + coins + ' coins.')
       + (fee ? ' Appearance fee: hole coins ' + (stats.feeMult === 3 ? 'tripled.' : 'doubled.') : '')
+      + (bonus ? ' ' + Career.TOURS[hole.course.tier].signature + ': hole coins ' + (SIGNATURE_PAY === 2 ? 'doubled.' : 'multiplied by ' + SIGNATURE_PAY + '.') : '')
       + (breakthrough ? ' Breakthrough: experience doubled.' : '')
       + (career.notes.length ? ' ' + career.notes.join('. ') + '.' : '')
       + (levelled.length ? ' Level up: ' + levelled.join(', ') + '.' : ''));
@@ -5799,6 +6014,11 @@ h3,
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     snapToPalette(true);
     drawWindText();
+    // in a tournament, the hole's number on the course and the signature hole's name
+    if (hole.course) {
+      pixelText('HOLE ' + (hole.course.index + 1) + '  PAR ' + hole.par, PIXEL_W / 2, 3, PAL.white);
+      if (hole.course.index === signatureHole(hole.course.tier)) pixelText(Career.TOURS[hole.course.tier].signature, PIXEL_W / 2, 10, PAL.gold);
+    }
     for (const f of floaters) {
       // call-outs blink out over their last moments instead of fading
       if (!reduceMotion && f.life < 0.4 && Math.floor(f.life * 20) % 2) continue;
@@ -5920,7 +6140,7 @@ h3,
     line('PAR ' + hole.par, 46);
     line('SHOT ' + Math.min(MAX_STROKES, strokes + (phase === 'aiming' ? 1 : 0)), 54);
     if (plan && phase !== 'holed') {
-      line(plan.putt ? 'PUTTER' : plan.club.name, 68, PAL.pale);
+      line(plan.putt ? 'PUTTER' : (plan.swing < 1 ? (plan.swing === 0.5 ? '1/2 ' : '3/4 ') : '') + plan.club.name, 68, PAL.pale);
       line('PIN ' + Math.round(Math.hypot(hole.cup.x - ball.x, hole.cup.z - ball.z)), 76);
       line(plan.lie || (plan.putt ? 'GREEN' : standing(null)), 84, PAL.grey);
     }
@@ -6332,7 +6552,8 @@ h3,
           ['Sand saves', outOf(r.sandSaves, r.sandHoles)],
           ['Water balls', count(r.waterBalls)],
           ['Trees hit', count(r.treesHit)],
-          ['Punch shots under the branches', count(r.punches)]
+          ['Punch shots under the branches', count(r.punches)],
+          ['Shorter swings to keep out of the wind', count(r.shortSwings)]
         ],
         clubs: CLUBS.map(club => {
           const used = r.clubs[club.name];
@@ -6367,6 +6588,8 @@ h3,
       ['Trophy cabinet (wins in every career)', Career.TOURS.map((tour, i) => [tour.name, count(save.legacy.trophies[i])])],
       ['Course records (best nine in a tournament, in every career)', Career.TOURS.map((tour, i) =>
         [tour.course, save.legacy.courseRecords[i] === null ? '-' : toPar(save.legacy.courseRecords[i])])],
+      ['Signature holes (fewest strokes in a tournament, in every career)', Career.TOURS.map((tour, i) =>
+        [tour.signature + ', ' + tour.course, save.legacy.signatureBest[i] === null ? '-' : count(save.legacy.signatureBest[i])])],
       ['Rivals (tournaments together, finished ahead of them)', Object.keys(save.legacy.rivals)
         .sort((a, b) => save.legacy.rivals[b].met - save.legacy.rivals[a].met)
         .map(name => {
@@ -6473,6 +6696,7 @@ h3,
       ? 'Auto-accept haggles over every contract and sponsor it takes, as it takes them (a ' + chance + '% chance of talking each one up). The contract or deal says how it went.'
       : 'Auto-accept does not haggle yet: at a ' + chance + '% chance it would lose more than it won. It starts at ' + Math.round(Career.HAGGLE_AUTO * 100) +
         '%, which comes at Negotiation level ' + (save.attrs.negotiation.level + Math.ceil((Career.HAGGLE_AUTO - stats.haggle) / 0.02 - 1e-9)) + '.';
+    el.autoNote.textContent += ' It lets a contract that is running late go when a much better one is on offer.';
 
     el.contracts.textContent = '';
     const active = career.contract;
@@ -6547,6 +6771,7 @@ h3,
 
     el.autoGear.checked = career.autoGear;
     el.autoGearFirst.value = career.autoGearFirst;
+    el.autoAcademy.checked = career.autoAcademy;
     el.gear.textContent = '';
     for (const g of Career.GEAR) {
       const tier = Career.TIERS[career.gear[g.id]];
@@ -6625,7 +6850,13 @@ h3,
   function updateHud() {
     if (quiet) return;
     el.coins.textContent = save.coins.toLocaleString();
-    el.hole.textContent = hole ? hole.number : save.hole;
+    // in a tournament the hole goes by its number on the course, as the course view and the map have it,
+    // and the career's hole number moves up into the label
+    const career = hole ? hole.number : save.hole;
+    const course = hole && hole.course;
+    const playoff = !!(course && save.career.tournament && save.career.tournament.playoff);
+    el.holeLabel.textContent = course ? (playoff ? 'Play-off ' : 'Hole ') + career : 'Hole';
+    el.hole.textContent = course ? (course.index + 1) + (playoff ? '' : '/' + Career.TOUR_HOLES) : career;
     el.par.textContent = hole ? hole.par : '-';
     el.difficulty.textContent = hole ? Math.round(hole.difficulty * 100) + '%' : '-';
     el.strokes.textContent = strokes;
@@ -6688,7 +6919,7 @@ h3,
         ? 'play-off with ' + t.playoff.names.join(' and ') + ', hole ' + (t.playoff.holes + 1)
         : played ? 'at ' + tour.course + ', through ' + played + ' of ' + Career.TOUR_HOLES : 'at ' + tour.course + ', starting on the next hole')));
       const record = save.legacy.courseRecords[t.tier];
-      box.appendChild(make('p', 'muted', 'Signature hole: the ' + Career.ordinal(signatureHole(t.tier) + 1) + ', ' + tour.signature + '.' +
+      box.appendChild(make('p', 'muted', signatureText(t.tier) +
         (record === null ? '' : ' Your course record: ' + toPar(record) + '.')));
       Career.standings(t).forEach((row, i) => {
         const line = make('div', row.you ? 'board-row you' : 'board-row');
@@ -6727,7 +6958,7 @@ h3,
         tour.name,
         unlocked
           ? Career.TOUR_HOLES + ' holes at ' + tour.course + ' (' + tour.theme + ') against three rivals. ' + (wins ? 'Won ' + wins + (wins === 1 ? ' time.' : ' times.') : 'Not won yet.') +
-            ' Signature hole: the ' + Career.ordinal(signatureHole(i) + 1) + ', ' + tour.signature + '.' +
+            ' ' + signatureText(i) +
             (save.legacy.courseRecords[i] === null ? '' : ' Your course record: ' + toPar(save.legacy.courseRecords[i]) + '.')
           : 'Win ' + Career.theName(i - 1) + ' to unlock.',
         'Entry ' + fee.toLocaleString() + ', first prize ' + Math.round(fee * Career.TOUR_PRIZES[0]).toLocaleString() + ' coins',
@@ -6777,9 +7008,8 @@ h3,
     return Math.floor(levels / LEGACY_LEVELS) + tiers + save.career.academy;
   }
 
-  // What the next junior academy costs: somewhere for coins to go once there is nothing left to buy.
   function academyCost() {
-    return ACADEMY_COST * Math.pow(2, save.career.academy);
+    return Career.academyCost(save.career);
   }
 
   // Retiring is earned: the golfer must have won The Major this career.
@@ -6868,6 +7098,7 @@ h3,
     const autoEnter = save.career.tour.auto;
     const autoGear = save.career.autoGear;
     const autoGearFirst = save.career.autoGearFirst;
+    const autoAcademy = save.career.autoAcademy;
     const bench = save.career.bench;
     legacy.history.push({
       holes: save.hole - 1, level: Attributes.rank(save.attrs).level,
@@ -6884,6 +7115,7 @@ h3,
     save.career.tour.auto = autoEnter;
     save.career.autoGear = autoGear;
     save.career.autoGearFirst = autoGearFirst;
+    save.career.autoAcademy = autoAcademy;
     save.career.bench = bench;
     stats = buildStats();
     momentum = 0;
@@ -6945,6 +7177,11 @@ h3,
     updateHud();
     updateAttributes();
     renderCareer();
+  });
+
+  el.autoAcademy.addEventListener('change', () => {
+    save.career.autoAcademy = el.autoAcademy.checked;
+    writeSave();
   });
 
   for (const first of Career.GEAR_FIRST) {
@@ -7101,7 +7338,7 @@ h3,
       'Tournament: ' + (t ? Career.TOURS[t.tier].name + (t.pending ? ', starting next hole' : t.playoff ? ', play-off' : ', through ' + t.scores.length) : 'none') +
         '; top tier open: ' + Career.TOURS[career.tour.unlocked].name + '; season ' + career.season.number + ', ' + career.season.played + ' played',
       'Equipment tiers: ' + Career.GEAR.map(g => career.gear[g.id]).join(' ') + '; caddie ' + career.caddie + '; staff ' + Career.STAFF.map(hire => career.staff[hire.id]).join(' ') + (career.bench.length ? '; left out: ' + career.bench.join(', ') : ''),
-      'Switches: auto-accept ' + (career.auto ? 'on' : 'off') + ', auto-enter ' + (career.tour.auto ? 'on' : 'off') + ', auto-buy ' + (career.autoGear ? 'on' : 'off') +
+      'Switches: auto-accept ' + (career.auto ? 'on' : 'off') + ', auto-enter ' + (career.tour.auto ? 'on' : 'off') + ', auto-buy ' + (career.autoGear ? 'on' : 'off') + (career.autoAcademy ? ' with academies' : '') +
         ', speed ' + speed + 'x, view ' + view + (reduceMotion ? ', reduce motion' : '') + (paused ? ', paused' : ''),
       'Window: ' + window.innerWidth + ' by ' + window.innerHeight
     ];
@@ -7314,6 +7551,10 @@ h3,
   // The same from the keyboard, when nothing on the page has the focus:
   // Enter or Escape puts away whatever is held up, and S on the title screen switches sound.
   window.addEventListener('keydown', event => {
+    if (!el.news.hidden && (event.key === 'Enter' || event.key === 'Escape')) {
+      closeNews();
+      return;
+    }
     if (!overlay || (event.target && event.target !== document.body && event.target !== canvas)) return;
     if (overlay.kind === 'title' && (event.key === 's' || event.key === 'S')) {
       el.sound.click();
@@ -7446,6 +7687,43 @@ h3,
   renderTourTip();
   el.autoUpdate.checked = prefs.autoUpdate !== false;
   setMoments(prefs.moments === true);
+
+  // ---------- what's new ----------
+
+  // Holds up the changes made since entry `since` (0 for all of them), newest first.
+  function showNews(since) {
+    const entries = Changes.filter(entry => entry.id > since);
+    if (!entries.length) return;
+    el.newsList.textContent = '';
+    for (const entry of entries) {
+      el.newsList.appendChild(make('p', 'label', entry.date));
+      const list = make('ul', '');
+      for (const item of entry.items) list.appendChild(make('li', '', item));
+      el.newsList.appendChild(list);
+    }
+    el.news.hidden = false;
+  }
+
+  // Put away, the list is not held up again until there is something newer on it.
+  function closeNews() {
+    el.news.hidden = true;
+    prefs.news = NEWEST;
+    savePrefs();
+  }
+
+  const NEWEST = Changes.length ? Changes[0].id : 0;
+  el.newsClose.addEventListener('click', closeNews);
+  el.whatsNew.addEventListener('click', () => showNews(0));
+  if (Number.isInteger(prefs.news)) {
+    showNews(prefs.news);
+  } else if (returning) {
+    // a player from before the list was kept is shown the newest entry
+    showNews(NEWEST - 1);
+  } else {
+    // a new player has nothing to compare with
+    prefs.news = NEWEST;
+    savePrefs();
+  }
 
   playTimeAway(() => {
     updateAttributes();
