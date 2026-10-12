@@ -996,6 +996,14 @@ h3,
 // item as { text, issue } with the report's number, and the list links to it.
 const Changes = [
   {
+    id: 6,
+    date: '2026-10-11',
+    items: [
+      { issue: 8, text: 'Fixed: everything bought in the legacy shop was lost whenever the page was reloaded or a new build loaded, and so was the list of past careers. Purchases now stay. If yours were lost, the legacy points you spent on them are back on the Legacy tab to spend again. The list of past careers could not be brought back, and starts again from your next retirement.' },
+      'New in the legacy shop: Club colours, for 2 points. It lets the golfer wear any of five strips, chosen with the Change button under it on the Legacy tab, and the flag flies the colour of the shirt. It is for show only.'
+    ]
+  },
+  {
     id: 5,
     date: '2026-10-11',
     items: [
@@ -2898,7 +2906,7 @@ const Changes = [
   // which palette colour each letter stands for; a dot is see-through
   const INK = {
     k: 'black', w: 'white', r: 'red', s: 'skin', b: 'deep', n: 'trunk', g: 'grey',
-    p: 'pine', d: 'fairwayDark', l: 'fairway'
+    p: 'pine', d: 'fairwayDark', l: 'fairway', y: 'gold'
   };
 
   // legs, side-on: knees a little bent, toes pointing at the ball
@@ -3155,7 +3163,19 @@ const Changes = [
   // of the golfer's as. The bag is drawn beside them.
   const CADDIE_INK = { r: 'w', b: 'w', w: 'p' };
 
-  window.Sprites = { WIDTH, HEIGHT, ANCHOR, UNIT, INK, POSES, ICONS, CADDIE_INK };
+  // What the golfer may wear once Club colours is bought in the legacy shop:
+  // which letter to read the shirt (r) and the trousers (b) as. The first is
+  // what everyone starts in. The flag flies the shirt's colour, so no shirt is
+  // the colour of water, rough or sand: the course view textures those wherever they are.
+  const COLOURS = [
+    { id: 'red', name: 'Red and navy', inks: {} },
+    { id: 'gold', name: 'Gold and navy', inks: { r: 'y' } },
+    { id: 'teal', name: 'Teal and white', inks: { r: 'p', b: 'w' } },
+    { id: 'white', name: 'White and brown', inks: { r: 'w', b: 'n' } },
+    { id: 'navy', name: 'Navy and grey', inks: { r: 'b', b: 'g' } }
+  ];
+
+  window.Sprites = { WIDTH, HEIGHT, ANCHOR, UNIT, INK, POSES, ICONS, CADDIE_INK, COLOURS };
 })();
 </script>
   <script>
@@ -3176,7 +3196,7 @@ const Changes = [
   const MIGRATIONS = {};
   // Which build this is. tools/single-file.js writes the date and commit in
   // here when it builds the game for sharing; run from the project it stays 'dev'.
-  const BUILD = "2026-10-11 (5b1882c)";
+  const BUILD = "2026-10-12 (4f6d34b)";
   // Where the newest shared build says which build it is, and where it can be
   // played or downloaded. A shared copy looks there now and then to see
   // whether it has been overtaken; nothing is sent.
@@ -3301,6 +3321,7 @@ const Changes = [
   // Things legacy points can be spent on. Each is bought one level at a time
   // and lasts for good. costs[i] is the price of level i + 1.
   const SEED_COINS = [0, 1000, 10000, 100000];   // what Seed money gives at each level
+  const HISTORY_SIZE = 20;       // past careers remembered
   const SHOP = [
     {
       id: 'headStart', name: 'Head start', costs: [4, 6, 8, 10, 12],
@@ -3337,6 +3358,10 @@ const Changes = [
     {
       id: 'fastPlay', name: 'Fast play', costs: [8],
       text: n => (n ? 'The 2x speed button is unlocked' : 'Play speed is 1x only')
+    },
+    {
+      id: 'colours', name: 'Club colours', costs: [2],
+      text: n => (n ? 'The golfer can wear other colours, and the flag flies them' : 'The golfer wears red and navy, and the flag is red')
     }
   ];
 
@@ -3551,7 +3576,6 @@ const Changes = [
   let reduceMotion = false;      // no particles, drifting or blinking, and the camera cuts instead of gliding
   let hideMinimap = false;
   let tourTipOff = false;        // true once the player has put the word about tournaments away
-  const HISTORY_SIZE = 20;       // past careers remembered
   let paused = false;
   let speed = 1;                 // play speed chosen with the speed buttons
   let quiet = false;             // true while replaying time away: no saving, no page updates
@@ -3601,11 +3625,12 @@ const Changes = [
   // courseRecords is the player's best nine against par in a tournament on
   // each tier's course, over every career, or null where none has been finished.
   // signatureBest is the fewest strokes taken on each course's signature hole
-  // in a tournament, likewise.
+  // in a tournament, likewise. colours is what the golfer wears, one of
+  // Sprites.COLOURS; it is for show, and stays the first until Club colours is bought.
   function freshLegacy() {
     const shop = {};
     for (const item of SHOP) shop[item.id] = 0;
-    return { points: 0, total: 0, retirements: 0, shop, history: [], trophies: Career.TOURS.map(() => 0), courseRecords: Career.TOURS.map(() => null), signatureBest: Career.TOURS.map(() => null), played: 0, seasons: 0, rivals: {} };
+    return { points: 0, total: 0, retirements: 0, shop, colours: Sprites.COLOURS[0].id, history: [], trophies: Career.TOURS.map(() => 0), courseRecords: Career.TOURS.map(() => null), signatureBest: Career.TOURS.map(() => null), played: 0, seasons: 0, rivals: {} };
   }
 
   // Lifetime points count in full up to LEGACY_FULL and taper after that.
@@ -3737,6 +3762,10 @@ const Changes = [
             const level = raw.legacy.shop && raw.legacy.shop[item.id];
             if (Number.isInteger(level) && level >= 0) s.legacy.shop[item.id] = Math.min(item.costs.length, level);
           }
+          if (s.legacy.shop.colours && Sprites.COLOURS.some(c => c.id === raw.legacy.colours)) s.legacy.colours = raw.legacy.colours;
+          // points spent on what the shop no longer has are given back: for a while every purchase was lost on reloading
+          const spent = SHOP.reduce((sum, item) => sum + item.costs.slice(0, s.legacy.shop[item.id]).reduce((a, b) => a + b, 0), 0);
+          s.legacy.points = Math.max(s.legacy.points, s.legacy.total - spent);
         }
         // a save from before a career's own figures were kept: in a first career they are the lifetime ones
         if (!raw.careerRecords && s.legacy.retirements === 0) {
@@ -5983,6 +6012,15 @@ const Changes = [
     ctx.fill();
   }
 
+  // What the golfer is wearing (see Sprites.COLOURS), and the colour of the shirt, which the flag flies.
+  function colours() {
+    return Sprites.COLOURS.find(c => c.id === save.legacy.colours) || Sprites.COLOURS[0];
+  }
+
+  function shirtColour() {
+    return PAL[Sprites.INK[colours().inks.r || 'r']];
+  }
+
   // The flag is out of the hole while the golfer is putting, and back in once the ball has dropped.
   function flagOut() {
     return !!plan && plan.putt && phase !== 'holed';
@@ -6001,7 +6039,7 @@ const Changes = [
     ctx.fillStyle = PAL.white;
     ctx.fillRect(base.x - LINE / 2, top, LINE, base.y - top);
     const size = Math.max(3 * LINE, 14 * s);
-    ctx.fillStyle = PAL.red;
+    ctx.fillStyle = shirtColour();
     const wind = hole.wind.speed;
     if (wind < 3) {
       // barely a breath: the flag hangs against the pole
@@ -6088,7 +6126,7 @@ const Changes = [
       ctx.fillRect(left + Math.round(pose.head[0] * k), top + Math.round(pose.head[1] * k), size, size);
     };
     if (pose.clubBehind) club();
-    stamp(pose.rows, left, top, k);
+    stamp(pose.rows, left, top, k, colours().inks);
     if (!pose.clubBehind) club();
   }
 
@@ -6470,9 +6508,9 @@ const Changes = [
 
     // everything standing on the map
     const at = (x, z) => ({ x: Math.round(map.left + z * map.scale), y: Math.round(map.top + x * map.scale) });
-    const icon = (rows, x, z) => {
+    const icon = (rows, x, z, inks) => {
       const p = at(x, z);
-      stamp(rows, p.x - (rows[0].length >> 1), p.y - rows.length + 1, 1);
+      stamp(rows, p.x - (rows[0].length >> 1), p.y - rows.length + 1, 1, inks);
     };
     const dot = (p, color) => {
       ctx.fillStyle = color;
@@ -6522,13 +6560,13 @@ const Changes = [
     }
 
     const cup = at(hole.cup.x, hole.cup.z);
-    stamp(Sprites.ICONS.flag, cup.x, cup.y - Sprites.ICONS.flag.length + 1, 1);
+    stamp(Sprites.ICONS.flag, cup.x, cup.y - Sprites.ICONS.flag.length + 1, 1, colours().inks);
     stepWalker();
     if (save.career.caddie) {
       const spot = caddieSpot();
       icon(Sprites.ICONS.caddie, spot.x, spot.z);
     }
-    icon(Sprites.ICONS.golfer, walker.x, walker.z);
+    icon(Sprites.ICONS.golfer, walker.x, walker.z, colours().inks);
     if (phase !== 'holed' || strokes >= MAX_STROKES) {
       // the ball rises off its shadow as it flies
       const spot = at(ball.x, ball.z);
@@ -6714,7 +6752,7 @@ const Changes = [
     }
     ctx.fillStyle = PAL.white;
     ctx.fillRect(green.x + 8, green.y - 30, 1, 30);
-    ctx.fillStyle = PAL.red;
+    ctx.fillStyle = shirtColour();
     ctx.fillRect(green.x + 9, green.y - 30, 10, 6);
     ctx.fillStyle = PAL.black;
     ctx.fillRect(green.x + 7, green.y, 3, 1);
@@ -7394,6 +7432,12 @@ const Changes = [
           legacy.shop[item.id]++;
           applyShopNow(item.id);
         })));
+      if (item.id === 'colours' && level) {
+        const at = Sprites.COLOURS.indexOf(colours());
+        const next = Sprites.COLOURS[(at + 1) % Sprites.COLOURS.length];
+        box.appendChild(dealRow('Colours', 'What the golfer wears. The flag flies the colour of the shirt.', colours().name,
+          actionButton('Change', true, () => { legacy.colours = next.id; })));
+      }
     }
     if (legacy.history.length) {
       box.appendChild(make('p', 'label', 'Past careers'));
