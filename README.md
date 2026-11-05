@@ -19,3 +19,11 @@ You can also write one from scratch on the [Issues](https://github.com/Shaggy405
 The build you are playing is shown at the foot of the page.
 
 The two typefaces, Press Start 2P and VT323, are included under the SIL Open Font License; see `OFL-PressStart2P.txt` and `OFL-VT323.txt`.
+
+## Talk to us
+
+Join the OMGaming community on Discord: https://discord.gg/AQcMRu47Jj
+
+For help with the game, write to support@omgamingllc.com.
+
+© 2026 OMGaming, LLC
