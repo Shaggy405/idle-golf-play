@@ -765,6 +765,84 @@ footer {
   white-space: nowrap;
 }
 
+/* Send feedback and My reports, in the What's new box's frame */
+.feedback-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  font-size: 18px;
+}
+
+.feedback-form[hidden] {
+  display: none;
+}
+
+.feedback-form p {
+  margin: 0;
+}
+
+.feedback-note,
+.feedback-details,
+.feedback-status {
+  color: #bcbcbc;
+}
+
+.feedback-form textarea {
+  width: 100%;
+  resize: vertical;
+  padding: 6px;
+  border: 1px solid #7c7c7c;
+  background: #101010;
+  color: #fcfcfc;
+  font: inherit;
+}
+
+.feedback-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.feedback-details pre {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+  font: inherit;
+  font-size: 16px;
+}
+
+.feedback-status:empty {
+  display: none;
+}
+
+.feedback-ticket {
+  color: #f8b800;
+  font-size: 22px;
+}
+
+.feedback-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.news-box .feedback-buttons .action {
+  align-self: auto;
+}
+
+.reports-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.reports-row span {
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+
 /* the publisher, how to get in touch, and the credits, on a line of their own under the buttons */
 .legal {
   display: flex;
@@ -1028,6 +1106,49 @@ h3,
     </div>
   </div>
 
+  <!-- Send feedback: the player's words, an optional picture of the course and what the game adds,
+       sent to the OMGaming feedback service; the player gets a ticket and a page to read the reply -->
+  <div id="feedback-box" class="news" hidden>
+    <div class="news-box feedback-box" role="dialog" aria-labelledby="feedback-title">
+      <h3 id="feedback-title">Send feedback</h3>
+      <div id="feedback-form" class="feedback-form">
+        <p class="feedback-note">Tell us about a problem, or something you'd like. It comes straight to us, and you need no account. Please don't type personal details.</p>
+        <label for="feedback-happened">What happened</label>
+        <textarea id="feedback-happened" rows="4" maxlength="4000"></textarea>
+        <label for="feedback-expected">What you expected</label>
+        <textarea id="feedback-expected" rows="2" maxlength="4000"></textarea>
+        <label class="feedback-check"><input id="feedback-attach" type="checkbox"> Attach a picture of the course</label>
+        <details class="feedback-details"><summary>What the game adds</summary><pre id="feedback-info"></pre></details>
+        <p id="feedback-status" class="feedback-status"></p>
+        <div class="feedback-buttons">
+          <button id="feedback-send" class="action" type="button">Send</button>
+          <button id="feedback-cancel" class="action" type="button">Back</button>
+        </div>
+      </div>
+      <div id="feedback-done" class="feedback-form" hidden>
+        <p id="feedback-ticket" class="feedback-ticket"></p>
+        <p>Thanks! Our reply will show on your report's page. You can find it again any time under My reports.</p>
+        <div class="feedback-buttons">
+          <button id="feedback-open" class="action" type="button">Open my report's page</button>
+          <button id="feedback-copy" class="action" type="button">Copy link</button>
+          <button id="feedback-finish" class="action" type="button">Done</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- My reports: the tickets sent from this browser -->
+  <div id="reports-box" class="news" hidden>
+    <div class="news-box" role="dialog" aria-labelledby="reports-title">
+      <h3 id="reports-title">My reports</h3>
+      <div id="reports-list" class="news-list"></div>
+      <div class="feedback-buttons">
+        <button id="reports-github" class="action" type="button">Older reports on GitHub</button>
+        <button id="reports-close" class="action" type="button">Close</button>
+      </div>
+    </div>
+  </div>
+
   <!-- who made the game and what it uses; opened from the foot of the page -->
   <div id="credits-box" class="news" hidden>
     <div class="news-box credits" role="dialog" aria-labelledby="credits-title">
@@ -1065,6 +1186,14 @@ h3,
 // (what they will see). Where a change answers a tester's report, write the
 // item as { text, issue } with the report's number, and the list links to it.
 const Changes = [
+  {
+    id: 8,
+    date: '2026-11-05',
+    items: [
+      'Send feedback now sends your report straight to us from the game: no GitHub account needed. Write what happened and what you expected, and tick "Attach a picture of the course" if a picture helps. "What the game adds" shows the details sent with it.',
+      'Once it is sent you get a ticket code and a link to the page for your report on omgamingllc.com, where our reply shows up. My reports lists the reports you have sent from this browser, with their links.'
+    ]
+  },
   {
     id: 7,
     date: '2026-11-05',
@@ -3276,18 +3405,22 @@ const Changes = [
   const MIGRATIONS = {};
   // Which build this is. tools/single-file.js writes the date and commit in
   // here when it builds the game for sharing; run from the project it stays 'dev'.
-  const BUILD = "2026-11-05 (e536101)";
+  const BUILD = "2026-11-05 (dd06cde)";
   // Where the newest shared build says which build it is, and where it can be
   // played or downloaded. A shared copy looks there now and then to see
   // whether it has been overtaken; nothing is sent.
   const LATEST_URL = 'https://shaggy405.github.io/idle-golf-play/version.txt';
   const PLAY_URL = 'https://shaggy405.github.io/idle-golf-play/';
   const UPDATE_EVERY = 5 * 60 * 1000;   // milliseconds between looks
-  // Where "Send feedback" opens a new report, already filled in.
-  const FEEDBACK_URL = 'https://github.com/Shaggy405/idle-golf-play/issues/new';
-  // Where a report can be read once it is sent: What's new links a change to the report it answers.
+  // Where "Send feedback" sends a report: the OMGaming feedback service. The
+  // key ships with the game, so it isn't a secret; it only keeps casual spam out.
+  const FEEDBACK_SERVICE = 'https://feedback.omgamingllc.com';
+  const FEEDBACK_GAME = 'idle-golf';
+  const FEEDBACK_KEY = 'EhsXKav12PyKWilw';
+  const TICKETS_KEY = 'idle-golf-feedback-tickets';   // the reports sent from this browser, for My reports
+  // Where a report sent through GitHub (until November 2026) can be read: What's new links a change to the report it answers.
   const REPORT_URL = 'https://github.com/Shaggy405/idle-golf-play/issues/';
-  // Where "My reports" goes: the reports sent from whichever GitHub account
+  // Older reports, sent through GitHub before the game sent its own: those sent from whichever GitHub account
   // the player is signed in to, open and closed, with any replies to them.
   const MY_REPORTS_URL = 'https://github.com/Shaggy405/idle-golf-play/issues?q=' + encodeURIComponent('is:issue author:@me sort:updated-desc');
   const PREFS_KEY = 'idle-golf-prefs-v1';   // which tab is open and the play speed; not part of the save
@@ -7826,44 +7959,199 @@ const Changes = [
   // Hands the player the save as a file.
   // ---------- feedback ----------
 
-  // What a report starts out saying: room for the player's own words, then
-  // where the game stood, so that nobody has to be asked. Nothing is sent
-  // from here; the player sees all of it on the page that opens and sends it themselves.
-  function feedbackBody() {
+  // Where the game stood, sent with a report so that nobody has to be asked,
+  // and shown on the form under "What the game adds" before it is sent.
+  function feedbackDetails() {
     const career = save.career;
     const t = career.tournament;
     const rank = Attributes.rank(save.attrs);
-    const lines = [
-      'What happened:',
-      '',
-      '',
-      'What I expected:',
-      '',
-      '',
-      '---',
-      'Filled in by the game. Please leave it; it helps find the problem.',
-      'Build: ' + BUILD,
-      'Hole ' + (hole ? hole.number : save.hole) + (hole ? ', par ' + hole.par + ', ' + hole.theme + ', stroke ' + strokes : ''),
-      'Golfer: ' + rank.name + ', overall level ' + rank.level + ' (' + Attributes.SUBS.map(sub => save.attrs[sub.id].level).join(' ') + ')',
-      'Career ' + (save.legacy.retirements + 1) + ', ' + save.holesPlayed.toLocaleString() + ' holes played, ' + Math.round(save.coins).toLocaleString() + ' coins',
-      'Tournament: ' + (t ? Career.TOURS[t.tier].name + (t.pending ? ', starting next hole' : t.playoff ? ', play-off' : ', through ' + t.scores.length) : 'none') +
+    return {
+      Build: BUILD,
+      Hole: (hole ? hole.number : save.hole) + (hole ? ', par ' + hole.par + ', ' + hole.theme + ', stroke ' + strokes : ''),
+      Golfer: rank.name + ', overall level ' + rank.level + ' (' + Attributes.SUBS.map(sub => save.attrs[sub.id].level).join(' ') + ')',
+      Career: (save.legacy.retirements + 1) + ', ' + save.holesPlayed.toLocaleString() + ' holes played, ' + Math.round(save.coins).toLocaleString() + ' coins',
+      Tournament: (t ? Career.TOURS[t.tier].name + (t.pending ? ', starting next hole' : t.playoff ? ', play-off' : ', through ' + t.scores.length) : 'none') +
         '; top tier open: ' + Career.TOURS[career.tour.unlocked].name + '; season ' + career.season.number + ', ' + career.season.played + ' played',
-      'Equipment tiers: ' + Career.GEAR.map(g => career.gear[g.id]).join(' ') + '; caddie ' + career.caddie + '; staff ' + Career.STAFF.map(hire => career.staff[hire.id]).join(' ') + (career.bench.length ? '; left out: ' + career.bench.join(', ') : ''),
-      'Switches: auto-accept ' + (career.auto ? 'on' : 'off') + ', auto-enter ' + (career.tour.auto ? 'on' : 'off') + ', auto-buy ' + (career.autoGear ? 'on' : 'off') + (career.autoAcademy ? ' with academies' : '') +
+      Equipment: 'tiers ' + Career.GEAR.map(g => career.gear[g.id]).join(' ') + '; caddie ' + career.caddie + '; staff ' + Career.STAFF.map(hire => career.staff[hire.id]).join(' ') + (career.bench.length ? '; left out: ' + career.bench.join(', ') : ''),
+      Switches: 'auto-accept ' + (career.auto ? 'on' : 'off') + ', auto-enter ' + (career.tour.auto ? 'on' : 'off') + ', auto-buy ' + (career.autoGear ? 'on' : 'off') + (career.autoAcademy ? ' with academies' : '') +
         ', speed ' + speed + 'x, view ' + view + (reduceMotion ? ', reduce motion' : '') + (paused ? ', paused' : ''),
-      'Window: ' + window.innerWidth + ' by ' + window.innerHeight
-    ];
-    return lines.join('\n');
+      Window: window.innerWidth + ' by ' + window.innerHeight
+    };
+  }
+
+  const fb = {
+    box: document.getElementById('feedback-box'),
+    form: document.getElementById('feedback-form'),
+    done: document.getElementById('feedback-done'),
+    happened: document.getElementById('feedback-happened'),
+    expected: document.getElementById('feedback-expected'),
+    attach: document.getElementById('feedback-attach'),
+    info: document.getElementById('feedback-info'),
+    status: document.getElementById('feedback-status'),
+    send: document.getElementById('feedback-send'),
+    ticket: document.getElementById('feedback-ticket'),
+    reports: document.getElementById('reports-box'),
+    reportsList: document.getElementById('reports-list')
+  };
+  let fbDetails = {};
+  let fbShot = '';          // the course as it was when the form opened, as base64 JPEG, or ''
+  let fbPending = null;     // a report that hasn't got in yet, so Try again sends the same one
+  let fbBusy = false;
+  let fbUrl = '';
+
+  // The course canvas as a JPEG of at most about 1 MB (base64 without its prefix), or ''.
+  function courseShot() {
+    if (typeof canvas.toDataURL !== 'function') return '';
+    for (const quality of [0.85, 0.7, 0.5]) {
+      try {
+        const data = String(canvas.toDataURL('image/jpeg', quality)).split(',')[1] || '';
+        if (data && data.length * 0.75 <= 1000000) return data;
+      } catch (error) {
+        return '';
+      }
+    }
+    return '';
+  }
+
+  // 24 random letters, digits, - and _: the private part of the ticket link.
+  function feedbackSecret() {
+    const bytes = new Uint8Array(24);
+    if (window.crypto && window.crypto.getRandomValues) window.crypto.getRandomValues(bytes);
+    else for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+    const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+    return Array.from(bytes, b => letters[b % 64]).join('');
+  }
+
+  function savedTickets() {
+    try {
+      const list = JSON.parse(localStorage.getItem(TICKETS_KEY) || '[]');
+      return Array.isArray(list) ? list : [];
+    } catch (error) {
+      return [];
+    }
+  }
+
+  function rememberTicket(code, url, words) {
+    const list = savedTickets().filter(ticket => ticket && ticket.code !== code);
+    list.unshift({ code, url, sentAt: Date.now(), summary: String(words).replace(/\s+/g, ' ').slice(0, 80) });
+    try {
+      localStorage.setItem(TICKETS_KEY, JSON.stringify(list.slice(0, 30)));
+    } catch (error) {
+      // a full or blocked store only loses My reports' list, never the report
+    }
+  }
+
+  function feedbackSay(text) {
+    fb.status.textContent = text;
+  }
+
+  // Opens the form with a picture of the course as it is now (taken before the
+  // form covers it). Words not yet sent stay in the boxes.
+  function openFeedback() {
+    fbShot = courseShot();
+    fbDetails = feedbackDetails();
+    fb.info.textContent = Object.keys(fbDetails).map(name => name + ': ' + fbDetails[name]).join('\n');
+    fb.attach.checked = false;
+    fb.attach.disabled = !fbShot;
+    if (!fb.done.hidden) {
+      fb.happened.value = '';
+      fb.expected.value = '';
+    }
+    fb.form.hidden = false;
+    fb.done.hidden = true;
+    fb.send.textContent = 'Send';
+    fb.send.disabled = false;
+    fbPending = null;
+    feedbackSay('');
+    fb.box.hidden = false;
+    if (fb.happened.focus) fb.happened.focus();
+  }
+
+  function closeFeedback() {
+    fb.box.hidden = true;
+  }
+
+  function sendFeedback() {
+    if (fbBusy) return;
+    const happened = String(fb.happened.value || '').trim();
+    const expected = String(fb.expected.value || '').trim();
+    if (!happened && !expected) {
+      feedbackSay('Write a few words first.');
+      return;
+    }
+    // The game run from the project folder never sends: only shared builds do.
+    if (BUILD === 'dev' || !window.fetch) {
+      feedbackSay('Not sent: reports are only sent from a shared copy of the game.');
+      return;
+    }
+    if (!fbPending) {
+      fbPending = { game: FEEDBACK_GAME, key: FEEDBACK_KEY, secret: feedbackSecret(), version: BUILD, happened, expected, info: fbDetails };
+      if (fb.attach.checked && fbShot) fbPending.screenshot = fbShot;
+    }
+    fbBusy = true;
+    fb.send.disabled = true;
+    feedbackSay('Sending...');
+    const report = fbPending;
+    window.fetch(FEEDBACK_SERVICE + '/api/report', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(report) })
+      .then(reply => reply.json().catch(() => ({})).then(data => ({ status: reply.status, data })))
+      .then(({ status, data }) => {
+        fbBusy = false;
+        fb.send.disabled = false;
+        if (status === 200 && data.ok) {
+          fbPending = null;
+          fbUrl = data.url;
+          rememberTicket(data.code, data.url, report.happened || report.expected);
+          fb.ticket.textContent = 'Sent. Your ticket is ' + data.code;
+          fb.form.hidden = true;
+          fb.done.hidden = false;
+          return;
+        }
+        if (status === 429) feedbackSay('Too many reports from here just now. Try again in an hour.');
+        else if (status >= 500) feedbackSay('Our server had a problem. Try again in a few minutes.');
+        else feedbackSay('Our server turned the report down (' + (data.error || status) + ').');
+        if (status === 400 || status === 403) fbPending = null;
+        else fb.send.textContent = 'Try again';
+      })
+      .catch(() => {
+        fbBusy = false;
+        fb.send.disabled = false;
+        fb.send.textContent = 'Try again';
+        feedbackSay("Couldn't reach our server. Check your connection and try again.");
+      });
+  }
+
+  // My reports: each ticket sent from this browser, to open its page.
+  function openReports() {
+    fb.reportsList.textContent = '';
+    const tickets = savedTickets();
+    fb.reportsList.appendChild(make('p', '', tickets.length
+      ? 'Reports sent from this browser. Open one to see where it stands and our reply.'
+      : 'None yet. Use Send feedback to tell us about a problem or an idea.'));
+    for (const ticket of tickets.slice(0, 10)) {
+      const row = make('div', 'reports-row');
+      row.appendChild(make('span', '', ticket.code + '  ' + (ticket.summary || '')));
+      const open = make('button', 'action', 'Open');
+      open.type = 'button';
+      open.addEventListener('click', () => { if (window.open) window.open(ticket.url, '_blank', 'noopener'); });
+      row.appendChild(open);
+      fb.reportsList.appendChild(row);
+    }
+    fb.reports.hidden = false;
   }
 
   el.build.textContent = BUILD === 'dev' ? '' : 'Build ' + BUILD;
-  el.feedback.addEventListener('click', () => {
-    const url = FEEDBACK_URL + '?title=' + encodeURIComponent('Feedback: ') + '&body=' + encodeURIComponent(feedbackBody());
-    if (window.open) window.open(url, '_blank', 'noopener');
+  el.feedback.addEventListener('click', openFeedback);
+  fb.send.addEventListener('click', sendFeedback);
+  document.getElementById('feedback-cancel').addEventListener('click', closeFeedback);
+  document.getElementById('feedback-finish').addEventListener('click', closeFeedback);
+  document.getElementById('feedback-open').addEventListener('click', () => { if (window.open && fbUrl) window.open(fbUrl, '_blank', 'noopener'); });
+  const copyButton = document.getElementById('feedback-copy');
+  copyButton.addEventListener('click', () => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(fbUrl).then(() => { copyButton.textContent = 'Link copied'; }, () => {});
   });
-  el.myReports.addEventListener('click', () => {
-    if (window.open) window.open(MY_REPORTS_URL, '_blank', 'noopener');
-  });
+  el.myReports.addEventListener('click', openReports);
+  document.getElementById('reports-github').addEventListener('click', () => { if (window.open) window.open(MY_REPORTS_URL, '_blank', 'noopener'); });
+  document.getElementById('reports-close').addEventListener('click', () => { fb.reports.hidden = true; });
 
   el.exportSave.addEventListener('click', () => {
     writeSave();
@@ -8065,6 +8353,13 @@ const Changes = [
   // The same from the keyboard, when nothing on the page has the focus:
   // Enter or Escape puts away whatever is held up, and S on the title screen switches sound.
   window.addEventListener('keydown', event => {
+    // Escape puts away Send feedback or My reports (Enter is for typing in the form).
+    if (event.key === 'Escape' && (!fb.box.hidden || !fb.reports.hidden)) {
+      closeFeedback();
+      fb.reports.hidden = true;
+      return;
+    }
+    if (!fb.box.hidden || !fb.reports.hidden) return;
     if (!el.news.hidden && (event.key === 'Enter' || event.key === 'Escape')) {
       closeNews();
       return;
